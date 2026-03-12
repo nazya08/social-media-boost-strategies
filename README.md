@@ -60,6 +60,13 @@
    - одразу запускає 1 цикл
    - далі запускає цикл кожні `INTERVAL_HOURS` годин **і тільки в вікні** `WINDOW_START_HOUR..WINDOW_END_HOUR` у `TIMEZONE`
 
+## Deploy на Vercel + Cron
+
+Vercel Hobby дозволяє лише **daily** cron jobs. Для запуску кожні 2 години:
+- деплоїмо сервіс на Vercel (endpoint `GET https://<domain>/api/cron`)
+- запускаємо **GitHub Actions schedule** (`.github/workflows/cron.yml`), який кожні 2 години викликає `/api/cron`
+- захищаємо endpoint через `CRON_SECRET` (header `x-cron-secret`)
+
 ## Тумблери безпеки
 
 - Зупинити автопостинг: `AUTOPUBLISH_ENABLED=false`
