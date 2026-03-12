@@ -4,8 +4,15 @@ export default async function handler(_req: any, res: any) {
   try {
     const secret = process.env.CRON_SECRET;
     if (secret) {
-      const headerSecret = String(_req?.headers?.["x-cron-secret"] ?? _req?.headers?.["X-Cron-Secret"] ?? "").trim();
-      const querySecret = String(_req?.query?.secret ?? "").trim();
+      const headerSecret = String(_req?.headers?.["x-cron-secret"] ?? "").trim();
+      let querySecret = "";
+      try {
+        const base = `https://${String(_req?.headers?.host ?? "localhost")}`;
+        const url = new URL(String(_req?.url ?? "/"), base);
+        querySecret = String(url.searchParams.get("secret") ?? "").trim();
+      } catch {
+        // ignore
+      }
       if (headerSecret !== secret && querySecret !== secret) {
         res.status(401).json({ ok: false, error: { message: "Unauthorized" } });
         return;
