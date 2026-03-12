@@ -64,3 +64,7 @@
 
 - Зупинити автопостинг: `AUTOPUBLISH_ENABLED=false`
 - Вимкнути Telegram-алерти: `TELEGRAM_ALERTS_ENABLED=false`
+
+## CTA
+
+CTA задається через env (`CTA_URL`, `CTA_TEXT_EN`, `CTA_TEXT_UA`) і зберігається в Airtable на етапі ingest. За потреби можна примусово перекинути CTA URL для публікації через `CTA_URL` (старі t.me лінки в останній частині будуть замінені).

@@ -143,7 +143,8 @@ const main = async () => {
       maxCharsPerPart: config.runtime.threadPartMaxChars,
       autopublishEnabled: config.runtime.autopublishEnabled,
       postMediaEnabled: config.runtime.postMediaEnabled,
-      maxToPublish: config.runtime.publishMaxPerRun
+      maxToPublish: config.runtime.publishMaxPerRun,
+      ctaUrlOverride: config.runtime.ctaUrl
     });
   });
 

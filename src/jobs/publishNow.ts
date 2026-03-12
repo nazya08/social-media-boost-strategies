@@ -31,6 +31,7 @@ export const publishNowJob = async (params: {
   postMediaEnabled: boolean;
   recordIds?: string[];
   maxToPublish?: number;
+  ctaUrlOverride?: string;
 }): Promise<{ attempted: number; published: number; failed: number; criticalAlerts: number }> => {
   if (!params.autopublishEnabled) {
     await params.logger.log({ level: "INFO", subsystem: "PUBLISH", message: "PublishNow: AUTOPUBLISH_ENABLED=false; skipping" });
@@ -76,7 +77,24 @@ export const publishNowJob = async (params: {
   for (const post of candidates) {
     const postId = post.id;
     const attemptCount = Number(post.fields?.[PostFields.AttemptCount] ?? 0);
-    const parts = safeJsonParse<string[]>(String(post.fields?.[PostFields.ThreadPartsJson] ?? "")) ?? [];
+    const rawParts = safeJsonParse<string[]>(String(post.fields?.[PostFields.ThreadPartsJson] ?? "")) ?? [];
+
+    const applyCtaOverride = (parts: string[]) => {
+      const url = String(params.ctaUrlOverride ?? "").trim();
+      if (!url || parts.length === 0) return parts;
+      const updated = parts.slice();
+      const idx = updated.length - 1;
+      const last = String(updated[idx] ?? "").trim();
+      const tmeRegex = /https?:\/\/t\.me\/[A-Za-z0-9_]+/g;
+      if (tmeRegex.test(last)) {
+        updated[idx] = last.replace(tmeRegex, url);
+      } else if (!last.includes(url)) {
+        updated[idx] = `${last} ${url}`.trim();
+      }
+      return updated;
+    };
+
+    const parts = applyCtaOverride(rawParts);
 
     const mediaUrl = String(post.fields?.[PostFields.MediaUrl] ?? "").trim();
     const mediaType = String(post.fields?.[PostFields.MediaType] ?? "").trim();
@@ -100,7 +118,8 @@ export const publishNowJob = async (params: {
         [PostFields.PostStatus]: "Publishing",
         [PostFields.LastAttemptAt]: now.toISO(),
         [PostFields.AttemptCount]: attemptCount + 1,
-        [PostFields.Error]: ""
+        [PostFields.Error]: "",
+        ...(params.ctaUrlOverride ? { [PostFields.CtaUrl]: params.ctaUrlOverride } : {})
       } as any);
 
       let result;

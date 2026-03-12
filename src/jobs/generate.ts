@@ -104,6 +104,9 @@ export const generateJob = async (params: {
   partsTargetMax: number;
   maxRecords: number;
   recordIds?: string[];
+  ctaUrlOverride?: string;
+  ctaTextEnOverride?: string;
+  ctaTextUaOverride?: string;
 }) => {
   let processed = 0;
   let generatedCount = 0;
@@ -125,12 +128,17 @@ export const generateJob = async (params: {
     const seedTitle = String(post.fields?.[PostFields.Title] ?? "Seed");
     const seedText = String(post.fields?.[PostFields.SeedText] ?? "");
     const seedUrl = String(post.fields?.[PostFields.SeedUrl] ?? "") || undefined;
-    const ctaText = String(post.fields?.[PostFields.CtaText] ?? "Більше про AI та автоматизації тут:");
-    const ctaUrl = String(post.fields?.[PostFields.CtaUrl] ?? "https://t.me/nazik_fill_ai_tech");
     const langRaw = String(post.fields?.[PostFields.Language] ?? "UA").trim().toUpperCase();
     const configuredLanguage = langRaw === "EN" ? ("EN" as const) : ("UA" as const);
     const inferredLanguage = detectLanguage(`${seedTitle}\n${seedText}`);
     const language = configuredLanguage === "UA" && inferredLanguage === "EN" ? ("EN" as const) : configuredLanguage;
+
+    const configuredCtaUrl = params.ctaUrlOverride ?? String(post.fields?.[PostFields.CtaUrl] ?? "");
+    const ctaUrl = configuredCtaUrl || "https://t.me/solutions_247ai";
+    const ctaText =
+      language === "EN"
+        ? params.ctaTextEnOverride ?? String(post.fields?.[PostFields.CtaText] ?? "More about AI & automation here:")
+        : params.ctaTextUaOverride ?? String(post.fields?.[PostFields.CtaText] ?? "Більше про AI та автоматизацію тут:");
 
     try {
       processed += 1;
@@ -172,6 +180,8 @@ export const generateJob = async (params: {
         [PostFields.Language]: generated.language,
         [PostFields.ThreadPartsJson]: JSON.stringify(adjustedParts),
         [PostFields.ThreadPreview]: toPreview(adjustedParts),
+        [PostFields.CtaText]: ctaText,
+        [PostFields.CtaUrl]: ctaUrl,
         [PostFields.Error]: "",
         [PostFields.FailureSubsystem]: null
       } as any);

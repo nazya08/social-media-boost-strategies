@@ -85,7 +85,10 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
       partsTargetMin: 8,
       partsTargetMax: 10,
       maxRecords: config.runtime.generateMaxRecords,
-      recordIds
+      recordIds,
+      ctaUrlOverride: config.runtime.ctaUrl,
+      ctaTextEnOverride: config.runtime.ctaTextEn,
+      ctaTextUaOverride: config.runtime.ctaTextUa
     });
   } else {
     await logger.log({ level: "INFO", subsystem: "GENERATE", message: "Once: no new seeds to generate" });
@@ -101,7 +104,8 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
     maxCharsPerPart: config.runtime.threadPartMaxChars,
     autopublishEnabled: config.runtime.autopublishEnabled,
     postMediaEnabled: config.runtime.postMediaEnabled,
-    maxToPublish: config.runtime.publishMaxPerRun
+    maxToPublish: config.runtime.publishMaxPerRun,
+    ctaUrlOverride: config.runtime.ctaUrl
   });
 
   await healthJob({
@@ -126,4 +130,3 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
     finishedAtIso: DateTime.now().toISO() ?? new Date().toISOString()
   };
 };
-
