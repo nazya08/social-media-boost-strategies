@@ -33,6 +33,8 @@ export const publishNowJob = async (params: {
   recordIds?: string[];
   maxToPublish?: number;
   ctaUrlOverride?: string;
+  promptThreadInterPartDelayMs?: number;
+  promptThreadReplyRetryDelayMs?: number;
 }): Promise<{ attempted: number; published: number; failed: number; criticalAlerts: number }> => {
   if (!params.autopublishEnabled) {
     await params.logger.log({ level: "INFO", subsystem: "PUBLISH", message: "PublishNow: AUTOPUBLISH_ENABLED=false; skipping" });
@@ -96,6 +98,7 @@ export const publishNowJob = async (params: {
     sortDirection: "desc",
     fields: [
       PostFields.PostStatus,
+      PostFields.Format,
       PostFields.AttemptCount,
       PostFields.ThreadPartsJson,
       PostFields.SeedUrl,
@@ -104,7 +107,8 @@ export const publishNowJob = async (params: {
       PostFields.MediaAltText,
       PostFields.Error,
       PostFields.ThreadsRootId,
-      PostFields.ThreadsRootUrl
+      PostFields.ThreadsRootUrl,
+      PostFields.CtaUrl
     ]
   });
 
@@ -124,6 +128,7 @@ export const publishNowJob = async (params: {
   for (const post of candidates) {
     const postId = post.id;
     const currentStatus = String(post.fields?.[PostFields.PostStatus] ?? "").trim();
+    const format = String(post.fields?.[PostFields.Format] ?? "").trim();
     const attemptCount = Number(post.fields?.[PostFields.AttemptCount] ?? 0);
     const rawParts = safeJsonParse<string[]>(String(post.fields?.[PostFields.ThreadPartsJson] ?? "")) ?? [];
     const existingError = String(post.fields?.[PostFields.Error] ?? "");
@@ -146,7 +151,26 @@ export const publishNowJob = async (params: {
       return updated;
     };
 
-    const parts = applyCtaOverride(rawParts);
+    const resolvedCtaUrl = String(params.ctaUrlOverride ?? String(post.fields?.[PostFields.CtaUrl] ?? "")).trim();
+
+    const ensureRootHasCtaUrl = (parts: string[]) => {
+      if (format !== "prompt_thread") return parts;
+      if (!resolvedCtaUrl) return parts;
+      if (parts.length === 0) return parts;
+      const root = String(parts[0] ?? "");
+      if (root.includes(resolvedCtaUrl)) return parts;
+
+      // Fail-safe: include CTA URL in root so it's never missing even if the thread is interrupted.
+      const suffix = `\n\n${resolvedCtaUrl}`;
+      const max = params.maxCharsPerPart;
+      const headMax = Math.max(0, max - suffix.length);
+      const head = root.length > headMax ? root.slice(0, headMax).trimEnd() : root.trimEnd();
+      const updated = parts.slice();
+      updated[0] = `${head}${suffix}`.slice(0, max).trim();
+      return updated;
+    };
+
+    const parts = ensureRootHasCtaUrl(applyCtaOverride(rawParts));
 
     const mediaUrl = String(post.fields?.[PostFields.MediaUrl] ?? "").trim();
     const mediaType = String(post.fields?.[PostFields.MediaType] ?? "").trim();
@@ -180,6 +204,7 @@ export const publishNowJob = async (params: {
         postRecordId: postId,
         meta: {
           status: currentStatus,
+          format,
           hasMedia: Boolean(rootMedia),
           partsCount: parts.length,
           partsLengths: parts.map((p) => String(p ?? "").length),
@@ -233,6 +258,14 @@ export const publishNowJob = async (params: {
           });
         };
 
+        const overrides =
+          format === "prompt_thread"
+            ? {
+                interPartDelayMs: params.promptThreadInterPartDelayMs,
+                replyRetryDelayMs: params.promptThreadReplyRetryDelayMs
+              }
+            : undefined;
+
         if (isResume) {
           const replyToId = progressState.publishedIds[progressState.publishedIds.length - 1] ?? progressState.rootId!;
           await params.threads.publishReplies({
@@ -240,14 +273,14 @@ export const publishNowJob = async (params: {
             parts,
             startIndex: Math.max(1, progressState.nextIndex),
             maxCharsPerPart: params.maxCharsPerPart,
-            opts: { log, onPartPublished }
+            opts: { log, onPartPublished, overrides }
           });
           const rootId = progressState.rootId ?? existingRootId;
           if (!rootId) throw new Error("Resume publish failed: missing rootId");
           const permalink = existingRootUrl || (await params.threads.getPermalink(rootId)) || "";
           result = { rootId, rootPermalink: permalink, allIds: progressState.publishedIds.slice() };
         } else {
-          result = await params.threads.publishThread(parts, params.maxCharsPerPart, rootMedia, { log, onPartPublished });
+          result = await params.threads.publishThread(parts, params.maxCharsPerPart, rootMedia, { log, onPartPublished, overrides });
         }
       } catch (err) {
         if (rootMedia && isMediaNotFoundError(err)) {
@@ -283,6 +316,14 @@ export const publishNowJob = async (params: {
             });
           };
 
+          const overrides =
+            format === "prompt_thread"
+              ? {
+                  interPartDelayMs: params.promptThreadInterPartDelayMs,
+                  replyRetryDelayMs: params.promptThreadReplyRetryDelayMs
+                }
+              : undefined;
+
           if (isResume) {
             const replyToId = progressState.publishedIds[progressState.publishedIds.length - 1] ?? progressState.rootId!;
             await params.threads.publishReplies({
@@ -290,14 +331,14 @@ export const publishNowJob = async (params: {
               parts,
               startIndex: Math.max(1, progressState.nextIndex),
               maxCharsPerPart: params.maxCharsPerPart,
-              opts: { log, onPartPublished }
+              opts: { log, onPartPublished, overrides }
             });
             const rootId = progressState.rootId ?? existingRootId;
             if (!rootId) throw new Error("Resume publish failed: missing rootId");
             const permalink = existingRootUrl || (await params.threads.getPermalink(rootId)) || "";
             result = { rootId, rootPermalink: permalink, allIds: progressState.publishedIds.slice() };
           } else {
-            result = await params.threads.publishThread(parts, params.maxCharsPerPart, undefined, { log, onPartPublished });
+            result = await params.threads.publishThread(parts, params.maxCharsPerPart, undefined, { log, onPartPublished, overrides });
           }
         } else {
           throw err;

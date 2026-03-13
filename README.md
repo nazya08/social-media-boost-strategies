@@ -27,6 +27,7 @@
    - якщо виконання перервалось (timeout/краш), публікація **resume-иться**:
      - під час публікації ми записуємо прогрес у `Posts.Error` як `PROGRESS:{...}`
      - наступний запуск продовжить з того місця, де зупинилось
+   - для `prompt_thread` є fail-safe: URL CTA додається також у root (щоб лінк не пропадав, навіть якщо тред обірвався)
 
 ## Telegram алерти (що саме прилітає)
 
@@ -63,6 +64,7 @@ Vercel Hobby дозволяє лише daily cron jobs. Тому схема та
 - `PARTS_TARGET_MIN/MAX` — цільова довжина для “не-спискових” форматів (prompt/news). Для `tool_list`/`alternatives_list` завжди робимо **2 частини**: (1) root зі списком, (2) CTA.
 - `THREADS_INTER_PART_DELAY_MS` — пауза перед кожним reply (менше = швидше, але може частіше ловити propagation errors).
 - `THREADS_REPLY_RETRY_*` — ретраї publish, якщо Graph API ще “не бачить” щойно створений контейнер/пост.
+- `PROMPT_THREAD_INTER_PART_DELAY_MS` / `PROMPT_THREAD_REPLY_RETRY_DELAY_MS` — окремі (швидші) затримки саме для `prompt_thread`, щоб не впиратися в serverless timeout.
 
 ## CTA
 

@@ -19,6 +19,12 @@ export type ThreadsPublishLogEvent = {
   meta?: unknown;
 };
 
+export type ThreadsPublishOverrides = {
+  replyRetryCount?: number;
+  replyRetryDelayMs?: number;
+  interPartDelayMs?: number;
+};
+
 export type ThreadsPartPublishedEvent = {
   partIndex: number;
   publishedId: string;
@@ -55,10 +61,10 @@ export class ThreadsClient {
   private async publishCreationIdWithRetry(
     creationId: string,
     emit?: (event: ThreadsPublishLogEvent) => Promise<void> | void,
-    ctx?: { partIndex?: number; isRoot?: boolean }
+    ctx?: { partIndex?: number; isRoot?: boolean; overrides?: ThreadsPublishOverrides }
   ) {
-    const retryCount = this.options.replyRetryCount ?? 3;
-    const retryDelayMs = this.options.replyRetryDelayMs ?? 30_000;
+    const retryCount = ctx?.overrides?.replyRetryCount ?? this.options.replyRetryCount ?? 3;
+    const retryDelayMs = ctx?.overrides?.replyRetryDelayMs ?? this.options.replyRetryDelayMs ?? 30_000;
 
     let lastErr: unknown;
     for (let attempt = 1; attempt <= retryCount; attempt++) {
@@ -155,6 +161,7 @@ export class ThreadsClient {
     opts?: {
       log?: (event: ThreadsPublishLogEvent) => Promise<void> | void;
       onPartPublished?: (event: ThreadsPartPublishedEvent) => Promise<void> | void;
+      overrides?: ThreadsPublishOverrides;
     }
   ): Promise<PublishResult> {
     if (parts.length < 2) throw new Error("Thread must have at least 2 parts (root + CTA).");
@@ -163,6 +170,7 @@ export class ThreadsClient {
 
     const allIds: string[] = [];
     const emit = opts?.log ? async (e: ThreadsPublishLogEvent) => await opts.log?.(e) : undefined;
+    const overrides = opts?.overrides;
 
     const rootParams: Record<string, string> = {
       media_type: rootMedia?.type ?? "TEXT",
@@ -196,18 +204,18 @@ export class ThreadsClient {
       meta: { creationId: rootCreationId }
     });
 
-    const rootId = await this.publishCreationIdWithRetry(rootCreationId, emit, { isRoot: true, partIndex: 0 });
+    const rootId = await this.publishCreationIdWithRetry(rootCreationId, emit, { isRoot: true, partIndex: 0, overrides });
     allIds.push(rootId);
     await opts?.onPartPublished?.({ partIndex: 0, publishedId: rootId });
 
     let replyToId = rootId;
-    const interPartDelayMs = this.options.interPartDelayMs ?? 30_000;
+    const interPartDelayMs = overrides?.interPartDelayMs ?? this.options.interPartDelayMs ?? 30_000;
     for (let i = 1; i < sanitized.length; i++) {
       let publishedId: string | undefined;
       let lastErr: unknown;
 
-      const retryCount = this.options.replyRetryCount ?? 3;
-      const retryDelayMs = this.options.replyRetryDelayMs ?? 30_000;
+      const retryCount = overrides?.replyRetryCount ?? this.options.replyRetryCount ?? 3;
+      const retryDelayMs = overrides?.replyRetryDelayMs ?? this.options.replyRetryDelayMs ?? 30_000;
 
       // Always wait before trying to create/publish a reply (matches desired behavior).
       await emit?.({
@@ -246,7 +254,7 @@ export class ThreadsClient {
             meta: { creationId }
           });
 
-          publishedId = await this.publishCreationIdWithRetry(creationId, emit, { partIndex: i, isRoot: false });
+          publishedId = await this.publishCreationIdWithRetry(creationId, emit, { partIndex: i, isRoot: false, overrides });
           break;
         } catch (err) {
           lastErr = err;
@@ -286,6 +294,7 @@ export class ThreadsClient {
     opts?: {
       log?: (event: ThreadsPublishLogEvent) => Promise<void> | void;
       onPartPublished?: (event: ThreadsPartPublishedEvent) => Promise<void> | void;
+      overrides?: ThreadsPublishOverrides;
     };
   }): Promise<{ allIds: string[] }> {
     const sanitized = params.parts.map((p) => clamp(String(p ?? ""), params.maxCharsPerPart).trim()).filter(Boolean);
@@ -297,9 +306,10 @@ export class ThreadsClient {
     const allIds: string[] = [];
 
     let replyToId = params.replyToId;
-    const interPartDelayMs = this.options.interPartDelayMs ?? 30_000;
-    const retryCount = this.options.replyRetryCount ?? 3;
-    const retryDelayMs = this.options.replyRetryDelayMs ?? 30_000;
+    const overrides = params.opts?.overrides;
+    const interPartDelayMs = overrides?.interPartDelayMs ?? this.options.interPartDelayMs ?? 30_000;
+    const retryCount = overrides?.replyRetryCount ?? this.options.replyRetryCount ?? 3;
+    const retryDelayMs = overrides?.replyRetryDelayMs ?? this.options.replyRetryDelayMs ?? 30_000;
 
     for (let i = start; i < sanitized.length; i++) {
       let publishedId: string | undefined;
@@ -341,7 +351,7 @@ export class ThreadsClient {
             meta: { creationId }
           });
 
-          publishedId = await this.publishCreationIdWithRetry(creationId, emit, { partIndex: i, isRoot: false });
+          publishedId = await this.publishCreationIdWithRetry(creationId, emit, { partIndex: i, isRoot: false, overrides });
           break;
         } catch (err) {
           lastErr = err;

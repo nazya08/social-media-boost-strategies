@@ -144,7 +144,9 @@ const main = async () => {
       autopublishEnabled: config.runtime.autopublishEnabled,
       postMediaEnabled: config.runtime.postMediaEnabled,
       maxToPublish: config.runtime.publishMaxPerRun,
-      ctaUrlOverride: config.runtime.ctaUrl
+      ctaUrlOverride: config.runtime.ctaUrl,
+      promptThreadInterPartDelayMs: config.runtime.promptThreadInterPartDelayMs,
+      promptThreadReplyRetryDelayMs: config.runtime.promptThreadReplyRetryDelayMs
     });
   });
 
