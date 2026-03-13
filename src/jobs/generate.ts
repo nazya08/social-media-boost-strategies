@@ -33,7 +33,7 @@ const inferFormatHint = (seedTitle: string, seedText: string): "tool_list" | "al
     .map((l) => l.trim())
     .filter(Boolean);
 
-  const alternativesCount = lines.filter((l) => /(→|->)/.test(l)).length;
+  const alternativesCount = lines.filter((l) => /(→|->|=>)/.test(l)).length;
   if (alternativesCount >= 3) return "alternatives_list";
 
   const numberedCount = lines.filter((l) => /^\d+[.)]\s+/.test(l)).length;
@@ -42,56 +42,57 @@ const inferFormatHint = (seedTitle: string, seedText: string): "tool_list" | "al
   return undefined;
 };
 
-const enforceRootListForToolPosts = (format: string, parts: string[], maxChars: number) => {
+const rebalanceListParts = (format: string, parts: string[], maxChars: number) => {
   if (!(format === "tool_list" || format === "alternatives_list")) return parts;
   if (parts.length < 2) return parts;
 
-  const cta = parts[parts.length - 1]!;
-  const nonCta = parts.slice(0, -1);
-  const combined = nonCta.join("\n");
+  const cta = String(parts[parts.length - 1] ?? "").trim();
+  const content = parts.slice(0, -1);
 
-  const listLineRegex =
-    format === "tool_list"
-      ? /^\s*\d+[.)]\s+.+/m
-      : /^\s*.+\s*(→|->)\s*.+/m;
+  const isToolLine = (line: string) => /^\s*(\d+[.)]\s+|[-•]\s+)\S+/.test(line);
+  const isAltLine = (line: string) => /\S+\s*(→|->|=>)\s*\S+/.test(line);
+  const isListLine = (line: string) => (format === "tool_list" ? isToolLine(line) : isAltLine(line));
 
-  const fitLines = (lines: string[]) => {
-    const kept: string[] = [];
-    for (const line of lines) {
-      const next = kept.length === 0 ? line : `${kept.join("\n")}\n${line}`;
-      if (next.length > maxChars) break;
-      kept.push(line);
-    }
-    return kept.join("\n").trim();
-  };
-
-  // If root already has list lines, keep just root + CTA (compact) but never cut mid-line.
-  if (listLineRegex.test(parts[0] ?? "")) {
-    const rootLines = String(parts[0] ?? "")
-      .split(/\r?\n/)
-      .map((l) => l.trimEnd())
-      .filter((l) => l.trim().length > 0);
-    const fitted = fitLines(rootLines);
-    return [fitted || String(parts[0] ?? "").slice(0, maxChars).trim(), cta];
-  }
-
-  // Extract candidate list lines from all parts.
-  const lines = combined
+  const lines = content
+    .join("\n")
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
 
-  const listLines = lines.filter((l) => listLineRegex.test(l));
-  const hook = (parts[0] ?? "").split(/\r?\n/)[0]?.trim() ?? "";
-  const rootLines: string[] = [];
-  if (hook) rootLines.push(hook);
-  for (const l of listLines) {
-    const next = rootLines.length === 0 ? l : `${rootLines.join("\n")}\n${l}`;
-    if (next.length > maxChars) break;
-    rootLines.push(l);
+  const uniqueListLines = Array.from(new Set(lines.filter(isListLine)));
+  if (uniqueListLines.length === 0) return parts;
+
+  const maxListLines = format === "tool_list" ? 14 : 12;
+  const listLines = uniqueListLines.slice(0, maxListLines);
+
+  const firstPartLines = String(content[0] ?? "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const hook = firstPartLines.find((l) => !isListLine(l)) ?? firstPartLines[0] ?? "";
+
+  const chunks: string[] = [];
+  const pushChunk = (chunkLines: string[]) => {
+    const text = chunkLines.join("\n").trim();
+    if (!text) return;
+    chunks.push(text.length > maxChars ? text.slice(0, maxChars).trim() : text);
+  };
+
+  let current: string[] = [];
+  if (hook) current.push(hook.length > maxChars ? hook.slice(0, maxChars).trim() : hook);
+
+  for (const line of listLines) {
+    const candidate = current.length === 0 ? line : `${current.join("\n")}\n${line}`;
+    if (candidate.length <= maxChars) {
+      current.push(line);
+      continue;
+    }
+    pushChunk(current);
+    current = [line.length > maxChars ? line.slice(0, maxChars).trim() : line];
   }
-  const root = rootLines.join("\n").trim();
-  return [root || String(parts[0] ?? "").slice(0, maxChars).trim(), cta];
+  pushChunk(current);
+
+  return [...chunks, cta].filter(Boolean);
 };
 
 export const generateJob = async (params: {
@@ -111,6 +112,7 @@ export const generateJob = async (params: {
   let processed = 0;
   let generatedCount = 0;
   let failedCount = 0;
+
   const baseFilter = `OR({${PostFields.PostStatus}}="Seeded", AND({${PostFields.PostStatus}}="Failed", {${PostFields.ThreadPartsJson}}=""))`;
   const idsFilter =
     params.recordIds && params.recordIds.length > 0
@@ -143,6 +145,12 @@ export const generateJob = async (params: {
     try {
       processed += 1;
       const formatHint = inferFormatHint(seedTitle, seedText);
+      const partsTargetMin =
+        formatHint === "tool_list" || formatHint === "alternatives_list" ? 2 : params.partsTargetMin;
+      const partsTargetMax =
+        formatHint === "tool_list" || formatHint === "alternatives_list"
+          ? Math.min(5, Math.max(2, params.partsTargetMax))
+          : params.partsTargetMax;
       let generated = await params.anthropic.generateThread({
         seedTitle,
         seedText,
@@ -150,8 +158,8 @@ export const generateJob = async (params: {
         language,
         formatHint,
         maxCharsPerPart: params.maxCharsPerPart,
-        partsTargetMin: params.partsTargetMin,
-        partsTargetMax: params.partsTargetMax,
+        partsTargetMin,
+        partsTargetMax,
         ctaText,
         ctaUrl
       });
@@ -165,14 +173,14 @@ export const generateJob = async (params: {
           language,
           formatHint,
           maxCharsPerPart: params.maxCharsPerPart,
-          partsTargetMin: params.partsTargetMin,
-          partsTargetMax: params.partsTargetMax,
+          partsTargetMin,
+          partsTargetMax,
           ctaText,
           ctaUrl
         });
       }
 
-      const adjustedParts = enforceRootListForToolPosts(generated.format, generated.parts, params.maxCharsPerPart);
+      const adjustedParts = rebalanceListParts(generated.format, generated.parts, params.maxCharsPerPart);
 
       await params.airtable.updateRecord(params.postsTableName, postId, {
         [PostFields.PostStatus]: "Generated",

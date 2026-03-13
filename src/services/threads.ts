@@ -19,6 +19,11 @@ export type ThreadsPublishLogEvent = {
   meta?: unknown;
 };
 
+export type ThreadsPartPublishedEvent = {
+  partIndex: number;
+  publishedId: string;
+};
+
 export type PublishResult = {
   rootId: string;
   rootPermalink?: string;
@@ -133,11 +138,24 @@ export class ThreadsClient {
     return text ? (JSON.parse(text) as any) : {};
   }
 
+  async getPermalink(postId: string): Promise<string | undefined> {
+    try {
+      const details = await this.getJson(`/${postId}`, { fields: "permalink" });
+      if (typeof details?.permalink === "string") return details.permalink;
+    } catch {
+      // best-effort
+    }
+    return undefined;
+  }
+
   async publishThread(
     parts: string[],
     maxCharsPerPart: number,
     rootMedia?: RootMedia,
-    opts?: { log?: (event: ThreadsPublishLogEvent) => Promise<void> | void }
+    opts?: {
+      log?: (event: ThreadsPublishLogEvent) => Promise<void> | void;
+      onPartPublished?: (event: ThreadsPartPublishedEvent) => Promise<void> | void;
+    }
   ): Promise<PublishResult> {
     if (parts.length < 2) throw new Error("Thread must have at least 2 parts (root + CTA).");
     const sanitized = parts.map((p) => clamp(String(p ?? ""), maxCharsPerPart).trim()).filter(Boolean);
@@ -180,6 +198,7 @@ export class ThreadsClient {
 
     const rootId = await this.publishCreationIdWithRetry(rootCreationId, emit, { isRoot: true, partIndex: 0 });
     allIds.push(rootId);
+    await opts?.onPartPublished?.({ partIndex: 0, publishedId: rootId });
 
     let replyToId = rootId;
     const interPartDelayMs = this.options.interPartDelayMs ?? 30_000;
@@ -251,16 +270,103 @@ export class ThreadsClient {
 
       allIds.push(publishedId);
       replyToId = publishedId;
+      await opts?.onPartPublished?.({ partIndex: i, publishedId });
     }
 
-    let permalink: string | undefined;
-    try {
-      const details = await this.getJson(`/${rootId}`, { fields: "permalink" });
-      if (typeof details?.permalink === "string") permalink = details.permalink;
-    } catch {
-      // best-effort
-    }
+    const permalink = await this.getPermalink(rootId);
 
     return { rootId, rootPermalink: permalink, allIds };
+  }
+
+  async publishReplies(params: {
+    replyToId: string;
+    parts: string[];
+    startIndex: number;
+    maxCharsPerPart: number;
+    opts?: {
+      log?: (event: ThreadsPublishLogEvent) => Promise<void> | void;
+      onPartPublished?: (event: ThreadsPartPublishedEvent) => Promise<void> | void;
+    };
+  }): Promise<{ allIds: string[] }> {
+    const sanitized = params.parts.map((p) => clamp(String(p ?? ""), params.maxCharsPerPart).trim()).filter(Boolean);
+    if (sanitized.length < 2) throw new Error("Thread parts are empty after sanitization.");
+    const start = Math.max(1, Math.min(params.startIndex, sanitized.length));
+    if (start >= sanitized.length) return { allIds: [] };
+
+    const emit = params.opts?.log ? async (e: ThreadsPublishLogEvent) => await params.opts?.log?.(e) : undefined;
+    const allIds: string[] = [];
+
+    let replyToId = params.replyToId;
+    const interPartDelayMs = this.options.interPartDelayMs ?? 30_000;
+    const retryCount = this.options.replyRetryCount ?? 3;
+    const retryDelayMs = this.options.replyRetryDelayMs ?? 30_000;
+
+    for (let i = start; i < sanitized.length; i++) {
+      let publishedId: string | undefined;
+      let lastErr: unknown;
+
+      await emit?.({
+        level: "INFO",
+        stage: "REPLY_WAIT",
+        partIndex: i,
+        message: `Waiting before reply publish attempt 1 (resume)`,
+        meta: { ms: interPartDelayMs, replyToId }
+      });
+      await this.sleep(interPartDelayMs);
+
+      for (let attempt = 1; attempt <= retryCount; attempt++) {
+        try {
+          await emit?.({
+            level: "INFO",
+            stage: "REPLY_CREATE",
+            partIndex: i,
+            attempt,
+            message: "Creating reply container (resume)",
+            meta: { replyToId }
+          });
+          const creation = await this.postForm(`/${this.options.userId}/threads`, {
+            media_type: "TEXT",
+            text: sanitized[i],
+            reply_to_id: replyToId
+          });
+          const creationId = String(creation?.id ?? "");
+          if (!creationId) throw new Error(`Threads create reply container returned no id: ${JSON.stringify(creation)}`);
+
+          await emit?.({
+            level: "INFO",
+            stage: "REPLY_CREATE",
+            partIndex: i,
+            attempt,
+            message: "Reply container created (resume)",
+            meta: { creationId }
+          });
+
+          publishedId = await this.publishCreationIdWithRetry(creationId, emit, { partIndex: i, isRoot: false });
+          break;
+        } catch (err) {
+          lastErr = err;
+          if (this.isPropagationNotReadyError(err) && attempt < retryCount) {
+            await emit?.({
+              level: "WARN",
+              stage: "REPLY_PUBLISH",
+              partIndex: i,
+              attempt,
+              message: "Reply not ready yet; sleeping before retry (resume)",
+              meta: { retryDelayMs }
+            });
+            await this.sleep(retryDelayMs);
+            continue;
+          }
+          throw err;
+        }
+      }
+
+      if (!publishedId) throw lastErr ?? new Error("Failed to publish reply (resume)");
+      allIds.push(publishedId);
+      replyToId = publishedId;
+      await params.opts?.onPartPublished?.({ partIndex: i, publishedId });
+    }
+
+    return { allIds };
   }
 }

@@ -39,32 +39,45 @@ export class AnthropicClient {
     const hintLineEn = input.formatHint ? `Preferred format: ${input.formatHint}. Use it unless clearly wrong.` : "";
     const hintLineUa = input.formatHint ? `Бажаний формат: ${input.formatHint}. Використай його, якщо це не явно неправильно.` : "";
 
-    const system =
-      input.language === "EN"
-        ? [
-            "You are a Threads content editor (English). Style: punchy, viral, clear, no fluff.",
-            "Do NOT copy seed text verbatim (no long exact substrings).",
-            "Write new content inspired by the seed angle.",
-            `Constraint: each thread part <= ${input.maxCharsPerPart} characters.`,
-            `Thread length: ${input.partsTargetMin}..${input.partsTargetMax} parts.`,
-            "Formats: prompt_thread (prompts list), tool_list (tools list), alternatives_list (paid→free swaps), news_insight (news→insight→action).",
-            "For tool_list: keep the root post under the limit by using 7–9 items max and very short descriptions.",
-            "For alternatives_list: keep swaps concise; 6–10 lines max.",
-            hintLineEn,
-            `Last part must be CTA: "${input.ctaText} ${input.ctaUrl}".`
-          ].join("\n")
-        : [
-            "Ти — український контент-редактор для Threads, стиль: енергійний, віральний, чіткий, без води.",
-            "Ти не копіюєш текст дослівно з SEED (жодних довгих дослівних шматків).",
-            "Ти генеруєш новий контент за ідеєю/кутом (angle) SEED.",
-            `Обмеження: кожна частина треду <= ${input.maxCharsPerPart} символів.`,
-            `Довжина треду: від ${input.partsTargetMin} до ${input.partsTargetMax} частин.`,
-            "Формати: prompt_thread (список промптів), tool_list (список інструментів), alternatives_list (платне→безкоштовне), news_insight (новина→висновок→що робити).",
-            "Для tool_list: щоб влізти в ліміт, роби 7–9 пунктів максимум і дуже короткі описи.",
-            "Для alternatives_list: роби свопи коротко; 6–10 рядків максимум.",
-            hintLineUa,
-            `Остання частина завжди CTA: "${input.ctaText} ${input.ctaUrl}".`
-          ].join("\n");
+    const baseRulesEn = [
+      "You are a Threads content editor (English). Style: punchy, viral, clear, no fluff.",
+      "Do NOT copy seed text verbatim (no long exact substrings). Write original content inspired by the seed angle.",
+      `Hard constraint: each thread part <= ${input.maxCharsPerPart} characters.`,
+      `Default length target: ${input.partsTargetMin}..${input.partsTargetMax} parts (you may use fewer/more if the format needs it).`,
+      "Formats: prompt_thread, tool_list, alternatives_list, news_insight.",
+      "Format rules:",
+      "- prompt_thread: 8–12 parts; split prompts across parts; keep each prompt compact.",
+      "- tool_list: 2–5 parts; ROOT must include hook + start the list; continue list in replies if needed; CTA last.",
+      "- alternatives_list: 2–5 parts; ROOT must include hook + start swaps; continue swaps in replies if needed; CTA last.",
+      "- news_insight: 3–6 parts; (news) → (why it matters) → (what to do).",
+      "For tool_list/alternatives_list: ROOT must include at least 3 list lines (don't put the entire list only in replies).",
+      "Keep lists useful but bounded: aim for ~10–14 total lines/items max (quality > quantity).",
+      hintLineEn,
+      `Last part must be CTA: "${input.ctaText} ${input.ctaUrl}".`
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const baseRulesUa = [
+      "Ти — український контент-редактор для Threads. Стиль: енергійний, віральний, чіткий, без води.",
+      "Не копіюй seed-текст дослівно (жодних довгих дослівних шматків). Генеруй оригінальний контент за кутом (angle) зі SEED.",
+      `Жорстке обмеження: кожна частина треду <= ${input.maxCharsPerPart} символів.`,
+      `Дефолтна ціль довжини: ${input.partsTargetMin}..${input.partsTargetMax} частин (можна менше/більше, якщо формат цього вимагає).`,
+      "Формати: prompt_thread, tool_list, alternatives_list, news_insight.",
+      "Правила форматів:",
+      "- prompt_thread: 8–12 частин; розкидай промпти по частинах; кожен короткий.",
+      "- tool_list: 2–5 частин; ROOT має містити хук + початок списку; якщо не влізло — продовж у replies; CTA останнім.",
+      "- alternatives_list: 2–5 частин; ROOT має містити хук + початок свопів; якщо не влізло — продовж у replies; CTA останнім.",
+      "- news_insight: 3–6 частин; (новина) → (чому важливо) → (що робити).",
+      "Для tool_list/alternatives_list: ROOT мусить мати щонайменше 3 рядки списку (не винось усе лише в replies).",
+      "Списки обмежуй по кількості: орієнтир ~10–14 ліній/пунктів (якість > кількість).",
+      hintLineUa,
+      `Остання частина завжди CTA: "${input.ctaText} ${input.ctaUrl}".`
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const system = input.language === "EN" ? baseRulesEn : baseRulesUa;
 
     const submitThreadTool = {
       name: "submit_thread",
@@ -81,16 +94,11 @@ export class AnthropicClient {
       }
     } as const;
 
-    const formatRule =
-      input.language === "EN"
-        ? "If format is tool_list or alternatives_list, return EXACTLY 2 parts: (1) hook + list, (2) CTA. Do not put the list only in replies."
-        : "Якщо формат tool_list або alternatives_list — поверни РІВНО 2 частини: (1) хук + список, (2) CTA. Не винось список лише в replies.";
-
     const payload = {
       model: this.options.model,
       max_tokens: 2200,
       temperature: 0.5,
-      system: system + "\n" + formatRule,
+      system,
       tools: [submitThreadTool],
       tool_choice: { type: "tool", name: "submit_thread" },
       messages: [
@@ -99,9 +107,7 @@ export class AnthropicClient {
           content: [
             {
               type: "text",
-              text:
-                userSeed +
-                "\n\nUse the tool `submit_thread` to return the result. parts: root first, CTA last."
+              text: `${userSeed}\n\nUse the tool \`submit_thread\` to return the result. parts: root first, CTA last.`
             }
           ]
         }
@@ -142,12 +148,12 @@ export class AnthropicClient {
     }
 
     if (!parsed || !Array.isArray((parsed as any).parts) || parsed.parts.length < 2) {
-      throw new Error(`Anthropic returned invalid structured output.`);
+      throw new Error("Anthropic returned invalid structured output.");
     }
 
     const sanitizedParts = parsed.parts.map((p: string) => clamp(String(p ?? ""), input.maxCharsPerPart).trim());
-    const last = sanitizedParts[sanitizedParts.length - 1] ?? "";
     const expectedCta = `${input.ctaText} ${input.ctaUrl}`.trim();
+    const last = sanitizedParts[sanitizedParts.length - 1] ?? "";
     if (!last.includes(input.ctaUrl)) {
       sanitizedParts[sanitizedParts.length - 1] = expectedCta;
     }
@@ -159,3 +165,4 @@ export class AnthropicClient {
     };
   }
 }
+
