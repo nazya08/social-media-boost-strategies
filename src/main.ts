@@ -126,8 +126,8 @@ const main = async () => {
         logger,
         anthropic,
         maxCharsPerPart: config.runtime.threadPartMaxChars,
-        partsTargetMin: 8,
-        partsTargetMax: 10,
+        partsTargetMin: config.runtime.partsTargetMin,
+        partsTargetMax: config.runtime.partsTargetMax,
         maxRecords: config.runtime.generateMaxRecords,
         recordIds
       });

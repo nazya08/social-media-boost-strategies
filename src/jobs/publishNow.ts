@@ -45,6 +45,45 @@ export const publishNowJob = async (params: {
   const basePublishable = `OR({${PostFields.PostStatus}}="Generated", AND({${PostFields.PostStatus}}="Failed", {${PostFields.FailureSubsystem}}="PUBLISH", {${PostFields.AttemptCount}}<3, NOT(REGEX_MATCH({${PostFields.Error}}, "HTTP 401|HTTP 403"))))`;
   const filterByFormula = idsFilter ? `AND(${idsFilter}, ${basePublishable})` : basePublishable;
 
+  const now = DateTime.now().setZone(params.timezone);
+
+  // Recover posts stuck in Publishing (typically due to runtime timeout mid-thread).
+  try {
+    const stuck = await params.airtable.listAll<Post>(params.postsTableName, {
+      filterByFormula: `AND({${PostFields.PostStatus}}="Publishing", {${PostFields.LastAttemptAt}}!="")`,
+      maxRecords: 20,
+      fields: [PostFields.LastAttemptAt, PostFields.AttemptCount]
+    });
+    const stuckMinutes = 20;
+    for (const p of stuck) {
+      const lastAttemptIso = String(p.fields?.[PostFields.LastAttemptAt] ?? "");
+      const lastAttempt = lastAttemptIso ? DateTime.fromISO(lastAttemptIso).setZone(params.timezone) : undefined;
+      const attempts = Number(p.fields?.[PostFields.AttemptCount] ?? 0);
+      const isStale = !lastAttempt || !lastAttempt.isValid || lastAttempt < now.minus({ minutes: stuckMinutes });
+      if (!isStale) continue;
+
+      await params.airtable.updateRecord(params.postsTableName, p.id, {
+        [PostFields.PostStatus]: attempts >= 3 ? "Failed" : "Generated",
+        [PostFields.Error]: `Recovered from stuck Publishing (>${stuckMinutes}m). Please retry.`,
+        [PostFields.FailureSubsystem]: "PUBLISH"
+      } as any);
+      await params.logger.log({
+        level: "WARN",
+        subsystem: "PUBLISH",
+        message: `Recovered stuck Publishing post ${p.id} (attempts=${attempts})`,
+        postRecordId: p.id,
+        meta: { lastAttemptAtIso: lastAttemptIso, stuckMinutes }
+      });
+    }
+  } catch (err) {
+    await params.logger.log({
+      level: "ERROR",
+      subsystem: "PUBLISH",
+      message: "Failed to recover stuck Publishing posts",
+      error: err
+    });
+  }
+
   const candidates = await params.airtable.listAll<Post>(params.postsTableName, {
     filterByFormula,
     maxRecords: params.maxToPublish ?? 10,
@@ -60,7 +99,6 @@ export const publishNowJob = async (params: {
     ]
   });
 
-  const now = DateTime.now().setZone(params.timezone);
   if (candidates.length === 0) {
     await params.logger.log({
       level: "INFO",
