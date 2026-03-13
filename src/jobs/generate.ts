@@ -2,6 +2,15 @@ import { AirtableClient } from "../airtable/airtableClient.js";
 import { PostFields } from "../airtable/fields.js";
 import { Logger } from "../logger.js";
 import { AnthropicClient } from "../services/anthropic.js";
+import {
+  buildRootWithLines,
+  extractNumberedLines,
+  extractSwapLines,
+  rewriteSwapLine,
+  rewriteToolListLine,
+  rootHasNumberedListLines,
+  rootHasSwapLines
+} from "../utils/listSeed.js";
 import { toPreview } from "../utils/text.js";
 
 type Post = Record<string, unknown>;
@@ -96,6 +105,44 @@ const enforceTwoPartListFormat = (format: string, parts: string[], maxChars: num
   return [root || String(parts[0] ?? "").slice(0, maxChars).trim(), cta].filter(Boolean);
 };
 
+const fallbackInjectListsFromSeed = (params: {
+  format: string;
+  language: "UA" | "EN";
+  seedTitle: string;
+  seedText: string;
+  generatedRoot: string;
+  parts: string[];
+  maxChars: number;
+}) => {
+  const seedCombined = `${params.seedTitle}\n${params.seedText}`;
+  const root = String(params.parts[0] ?? "");
+  const cta = String(params.parts[params.parts.length - 1] ?? "").trim();
+
+  if (params.format === "tool_list") {
+    if (rootHasNumberedListLines(root, 3)) return params.parts;
+    const numbered = extractNumberedLines(seedCombined);
+    if (numbered.length < 3) return params.parts;
+    const rewritten = numbered.map((l) => rewriteToolListLine(l, params.language)).filter(Boolean);
+    const hook = String(params.generatedRoot ?? "").trim() || (params.language === "UA" ? "Швидкий хак:" : "Quick hack:");
+    const newRoot = buildRootWithLines(hook, rewritten, params.maxChars);
+    return [newRoot || hook.slice(0, params.maxChars).trim(), cta].filter(Boolean);
+  }
+
+  if (params.format === "alternatives_list") {
+    if (rootHasSwapLines(root, 3)) return params.parts;
+    const swaps = extractSwapLines(seedCombined);
+    if (swaps.length < 3) return params.parts;
+    const rewritten = swaps.map((l) => rewriteSwapLine(l)).filter(Boolean);
+    const hook =
+      String(params.generatedRoot ?? "").trim() ||
+      (params.language === "UA" ? "Платне → безкоштовне:" : "Paid → free swaps:");
+    const newRoot = buildRootWithLines(hook, rewritten, params.maxChars);
+    return [newRoot || hook.slice(0, params.maxChars).trim(), cta].filter(Boolean);
+  }
+
+  return params.parts;
+};
+
 export const generateJob = async (params: {
   airtable: AirtableClient;
   postsTableName: string;
@@ -181,7 +228,16 @@ export const generateJob = async (params: {
         });
       }
 
-      const adjustedParts = enforceTwoPartListFormat(generated.format, generated.parts, params.maxCharsPerPart);
+      let adjustedParts = enforceTwoPartListFormat(generated.format, generated.parts, params.maxCharsPerPart);
+      adjustedParts = fallbackInjectListsFromSeed({
+        format: generated.format,
+        language: generated.language,
+        seedTitle,
+        seedText,
+        generatedRoot: generated.parts[0] ?? "",
+        parts: adjustedParts,
+        maxChars: params.maxCharsPerPart
+      });
 
       await params.airtable.updateRecord(params.postsTableName, postId, {
         [PostFields.PostStatus]: "Generated",
