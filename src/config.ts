@@ -64,7 +64,7 @@ export const ConfigSchema = z.object({
     // Threads text limit is 500 characters (including spaces/links)
     threadPartMaxChars: z.number().int().min(100).max(500).default(450),
     // Prompt threads are long; use faster delays to avoid serverless timeouts.
-    promptThreadInterPartDelayMs: z.number().int().min(0).max(300000).default(15000),
+    promptThreadInterPartDelayMs: z.number().int().min(0).max(300000).default(5000),
     promptThreadReplyRetryDelayMs: z.number().int().min(0).max(300000).default(20000)
   })
 });
@@ -131,7 +131,7 @@ export const loadConfig = (): AppConfig => {
       targetPostsPerDayMin: intFromEnv(process.env.TARGET_POSTS_PER_DAY_MIN, 3),
       targetPostsPerDayMax: intFromEnv(process.env.TARGET_POSTS_PER_DAY_MAX, 5),
       threadPartMaxChars: intFromEnv(process.env.THREAD_PART_MAX_CHARS, 450),
-      promptThreadInterPartDelayMs: intFromEnv(process.env.PROMPT_THREAD_INTER_PART_DELAY_MS, 15000),
+      promptThreadInterPartDelayMs: intFromEnv(process.env.PROMPT_THREAD_INTER_PART_DELAY_MS, 5000),
       promptThreadReplyRetryDelayMs: intFromEnv(process.env.PROMPT_THREAD_REPLY_RETRY_DELAY_MS, 20000)
     }
   };

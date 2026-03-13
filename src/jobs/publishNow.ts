@@ -136,8 +136,9 @@ export const publishNowJob = async (params: {
     const existingRootUrl = String(post.fields?.[PostFields.ThreadsRootUrl] ?? "").trim();
     let lastProgress: PublishProgress | undefined = undefined;
 
-    const applyCtaOverride = (parts: string[]) => {
-      const url = String(params.ctaUrlOverride ?? "").trim();
+    const resolvedCtaUrl = String(params.ctaUrlOverride ?? String(post.fields?.[PostFields.CtaUrl] ?? "")).trim();
+    const applyResolvedCtaOverride = (parts: string[]) => {
+      const url = resolvedCtaUrl;
       if (!url || parts.length === 0) return parts;
       const updated = parts.slice();
       const idx = updated.length - 1;
@@ -151,26 +152,8 @@ export const publishNowJob = async (params: {
       return updated;
     };
 
-    const resolvedCtaUrl = String(params.ctaUrlOverride ?? String(post.fields?.[PostFields.CtaUrl] ?? "")).trim();
-
-    const ensureRootHasCtaUrl = (parts: string[]) => {
-      if (format !== "prompt_thread") return parts;
-      if (!resolvedCtaUrl) return parts;
-      if (parts.length === 0) return parts;
-      const root = String(parts[0] ?? "");
-      if (root.includes(resolvedCtaUrl)) return parts;
-
-      // Fail-safe: include CTA URL in root so it's never missing even if the thread is interrupted.
-      const suffix = `\n\n${resolvedCtaUrl}`;
-      const max = params.maxCharsPerPart;
-      const headMax = Math.max(0, max - suffix.length);
-      const head = root.length > headMax ? root.slice(0, headMax).trimEnd() : root.trimEnd();
-      const updated = parts.slice();
-      updated[0] = `${head}${suffix}`.slice(0, max).trim();
-      return updated;
-    };
-
-    const parts = ensureRootHasCtaUrl(applyCtaOverride(rawParts));
+    // CTA must be ONLY in the last part (never injected into root).
+    const parts = applyResolvedCtaOverride(rawParts);
 
     const mediaUrl = String(post.fields?.[PostFields.MediaUrl] ?? "").trim();
     const mediaType = String(post.fields?.[PostFields.MediaType] ?? "").trim();
