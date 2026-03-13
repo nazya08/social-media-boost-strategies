@@ -60,11 +60,10 @@ Vercel Hobby дозволяє лише daily cron jobs. Тому схема та
 ## Тюнінг параметрів (важливе)
 
 - `THREAD_PART_MAX_CHARS` — ліміт символів на 1 частину (Threads: 500).
-- `PARTS_TARGET_MIN/MAX` — цільова довжина для “не-спискових” форматів (prompt/news). Для `tool_list`/`alternatives_list` ми все одно “чанкуємо” список у 2–5 частин за потреби.
+- `PARTS_TARGET_MIN/MAX` — цільова довжина для “не-спискових” форматів (prompt/news). Для `tool_list`/`alternatives_list` завжди робимо **2 частини**: (1) root зі списком, (2) CTA.
 - `THREADS_INTER_PART_DELAY_MS` — пауза перед кожним reply (менше = швидше, але може частіше ловити propagation errors).
 - `THREADS_REPLY_RETRY_*` — ретраї publish, якщо Graph API ще “не бачить” щойно створений контейнер/пост.
 
 ## CTA
 
 CTA задається через env (`CTA_URL`, `CTA_TEXT_EN`, `CTA_TEXT_UA`) і зберігається в Airtable на етапі ingest.
-

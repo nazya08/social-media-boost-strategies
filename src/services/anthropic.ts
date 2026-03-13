@@ -47,8 +47,8 @@ export class AnthropicClient {
       "Formats: prompt_thread, tool_list, alternatives_list, news_insight.",
       "Format rules:",
       "- prompt_thread: 8–12 parts; split prompts across parts; keep each prompt compact.",
-      "- tool_list: 2–5 parts; ROOT must include hook + start the list; continue list in replies if needed; CTA last.",
-      "- alternatives_list: 2–5 parts; ROOT must include hook + start swaps; continue swaps in replies if needed; CTA last.",
+      "- tool_list: EXACTLY 2 parts: (1) ROOT = hook + FULL list (fit within limit), (2) CTA. Do NOT continue the list in replies.",
+      "- alternatives_list: EXACTLY 2 parts: (1) ROOT = hook + FULL paid->free swaps list (fit within limit), (2) CTA. Do NOT continue the list in replies.",
       "- news_insight: 3–6 parts; (news) → (why it matters) → (what to do).",
       "For tool_list/alternatives_list: ROOT must include at least 3 list lines (don't put the entire list only in replies).",
       "Keep lists useful but bounded: aim for ~10–14 total lines/items max (quality > quantity).",
@@ -66,8 +66,8 @@ export class AnthropicClient {
       "Формати: prompt_thread, tool_list, alternatives_list, news_insight.",
       "Правила форматів:",
       "- prompt_thread: 8–12 частин; розкидай промпти по частинах; кожен короткий.",
-      "- tool_list: 2–5 частин; ROOT має містити хук + початок списку; якщо не влізло — продовж у replies; CTA останнім.",
-      "- alternatives_list: 2–5 частин; ROOT має містити хук + початок свопів; якщо не влізло — продовж у replies; CTA останнім.",
+      "- tool_list: РІВНО 2 частини: (1) ROOT = хук + ПОВНИЙ список (влізти в ліміт), (2) CTA. Не продовжуй список у replies.",
+      "- alternatives_list: РІВНО 2 частини: (1) ROOT = хук + ПОВНИЙ список свопів paid->free (влізти в ліміт), (2) CTA. Не продовжуй список у replies.",
       "- news_insight: 3–6 частин; (новина) → (чому важливо) → (що робити).",
       "Для tool_list/alternatives_list: ROOT мусить мати щонайменше 3 рядки списку (не винось усе лише в replies).",
       "Списки обмежуй по кількості: орієнтир ~10–14 ліній/пунктів (якість > кількість).",
@@ -165,4 +165,3 @@ export class AnthropicClient {
     };
   }
 }
-

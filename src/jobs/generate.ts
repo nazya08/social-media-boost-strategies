@@ -42,7 +42,7 @@ const inferFormatHint = (seedTitle: string, seedText: string): "tool_list" | "al
   return undefined;
 };
 
-const rebalanceListParts = (format: string, parts: string[], maxChars: number) => {
+const enforceTwoPartListFormat = (format: string, parts: string[], maxChars: number) => {
   if (!(format === "tool_list" || format === "alternatives_list")) return parts;
   if (parts.length < 2) return parts;
 
@@ -53,46 +53,47 @@ const rebalanceListParts = (format: string, parts: string[], maxChars: number) =
   const isAltLine = (line: string) => /\S+\s*(→|->|=>)\s*\S+/.test(line);
   const isListLine = (line: string) => (format === "tool_list" ? isToolLine(line) : isAltLine(line));
 
-  const lines = content
+  const fitLines = (lines: string[]) => {
+    const kept: string[] = [];
+    for (const line of lines) {
+      const next = kept.length === 0 ? line : `${kept.join("\n")}\n${line}`;
+      if (next.length > maxChars) break;
+      kept.push(line);
+    }
+    const text = kept.join("\n").trim();
+    return text.length > maxChars ? text.slice(0, maxChars).trim() : text;
+  };
+
+  // If root already has list lines, keep root + CTA (exactly 2 parts) but never cut mid-line.
+  if (isListLine(String(parts[0] ?? ""))) {
+    const rootLines = String(parts[0] ?? "")
+      .split(/\r?\n/)
+      .map((l) => l.trimEnd())
+      .filter((l) => l.trim().length > 0);
+    const fitted = fitLines(rootLines);
+    return [fitted || String(parts[0] ?? "").slice(0, maxChars).trim(), cta].filter(Boolean);
+  }
+
+  // Extract list lines across all content and build a single root that contains hook + list.
+  const allLines = content
     .join("\n")
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
 
-  const uniqueListLines = Array.from(new Set(lines.filter(isListLine)));
-  if (uniqueListLines.length === 0) return parts;
+  const listLines = allLines.filter(isListLine);
+  const hook = allLines.find((l) => !isListLine(l)) ?? String(parts[0] ?? "").split(/\r?\n/)[0]?.trim() ?? "";
 
-  const maxListLines = format === "tool_list" ? 14 : 12;
-  const listLines = uniqueListLines.slice(0, maxListLines);
-
-  const firstPartLines = String(content[0] ?? "")
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-  const hook = firstPartLines.find((l) => !isListLine(l)) ?? firstPartLines[0] ?? "";
-
-  const chunks: string[] = [];
-  const pushChunk = (chunkLines: string[]) => {
-    const text = chunkLines.join("\n").trim();
-    if (!text) return;
-    chunks.push(text.length > maxChars ? text.slice(0, maxChars).trim() : text);
-  };
-
-  let current: string[] = [];
-  if (hook) current.push(hook.length > maxChars ? hook.slice(0, maxChars).trim() : hook);
-
-  for (const line of listLines) {
-    const candidate = current.length === 0 ? line : `${current.join("\n")}\n${line}`;
-    if (candidate.length <= maxChars) {
-      current.push(line);
-      continue;
-    }
-    pushChunk(current);
-    current = [line.length > maxChars ? line.slice(0, maxChars).trim() : line];
+  const rootLines: string[] = [];
+  if (hook) rootLines.push(hook);
+  for (const l of listLines) {
+    const next = rootLines.length === 0 ? l : `${rootLines.join("\n")}\n${l}`;
+    if (next.length > maxChars) break;
+    rootLines.push(l);
   }
-  pushChunk(current);
 
-  return [...chunks, cta].filter(Boolean);
+  const root = fitLines(rootLines);
+  return [root || String(parts[0] ?? "").slice(0, maxChars).trim(), cta].filter(Boolean);
 };
 
 export const generateJob = async (params: {
@@ -149,7 +150,7 @@ export const generateJob = async (params: {
         formatHint === "tool_list" || formatHint === "alternatives_list" ? 2 : params.partsTargetMin;
       const partsTargetMax =
         formatHint === "tool_list" || formatHint === "alternatives_list"
-          ? Math.min(5, Math.max(2, params.partsTargetMax))
+          ? 2
           : params.partsTargetMax;
       let generated = await params.anthropic.generateThread({
         seedTitle,
@@ -180,7 +181,7 @@ export const generateJob = async (params: {
         });
       }
 
-      const adjustedParts = rebalanceListParts(generated.format, generated.parts, params.maxCharsPerPart);
+      const adjustedParts = enforceTwoPartListFormat(generated.format, generated.parts, params.maxCharsPerPart);
 
       await params.airtable.updateRecord(params.postsTableName, postId, {
         [PostFields.PostStatus]: "Generated",
