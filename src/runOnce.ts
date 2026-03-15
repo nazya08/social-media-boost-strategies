@@ -92,44 +92,46 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
     const key = account.key;
     const intervalHours = Math.max(1, account.intervalHours);
 
-    try {
-      const lastFinished = await getLastAccountCycleFinishedAt({
-        airtable,
-        runLogsTableName: config.airtable.runLogsTableName,
-        timezone: config.runtime.timezone,
-        accountKey: key
-      });
-      if (lastFinished) {
-        const hoursSince = now.diff(lastFinished, "hours").hours;
-        // Small slack to avoid accidental skips due to cron drift.
-        const slackHours = 0.05; // ~3 minutes
-        if (hoursSince < intervalHours - slackHours) {
-          const reason = `Account ${key}: last run ${Math.floor(hoursSince * 60)}m ago; interval=${intervalHours}h; skipping`;
-          await logger.log({ level: "INFO", subsystem: "SCHEDULE", message: reason });
-          perAccount[key] = { skipped: { reason } };
-          continue;
+    if (config.runtime.runLogsAirtableEnabled) {
+      try {
+        const lastFinished = await getLastAccountCycleFinishedAt({
+          airtable,
+          runLogsTableName: config.airtable.runLogsTableName,
+          timezone: config.runtime.timezone,
+          accountKey: key
+        });
+        if (lastFinished) {
+          const hoursSince = now.diff(lastFinished, "hours").hours;
+          // Small slack to avoid accidental skips due to cron drift.
+          const slackHours = 0.05; // ~3 minutes
+          if (hoursSince < intervalHours - slackHours) {
+            const reason = `Account ${key}: last run ${Math.floor(hoursSince * 60)}m ago; interval=${intervalHours}h; skipping`;
+            await logger.log({ level: "INFO", subsystem: "SCHEDULE", message: reason });
+            perAccount[key] = { skipped: { reason } };
+            continue;
+          }
         }
+      } catch (err) {
+        await logger.log({
+          level: "WARN",
+          subsystem: "SCHEDULE",
+          message: `Account ${key}: failed to read last cycle marker; running anyway`,
+          error: err
+        });
       }
-    } catch (err) {
-      await logger.log({
-        level: "WARN",
-        subsystem: "SCHEDULE",
-        message: `Account ${key}: failed to read last cycle marker; running anyway`,
-        error: err
-      });
-    }
 
-    try {
-      await writeAccountCycleMarker({
-        airtable,
-        runLogsTableName: config.airtable.runLogsTableName,
-        timezone: config.runtime.timezone,
-        accountKey: key,
-        event: "ACCOUNT_CYCLE_START",
-        meta: { intervalHours }
-      });
-    } catch (err) {
-      await logger.log({ level: "WARN", subsystem: "SCHEDULE", message: `Account ${key}: failed to write cycle START marker`, error: err });
+      try {
+        await writeAccountCycleMarker({
+          airtable,
+          runLogsTableName: config.airtable.runLogsTableName,
+          timezone: config.runtime.timezone,
+          accountKey: key,
+          event: "ACCOUNT_CYCLE_START",
+          meta: { intervalHours }
+        });
+      } catch (err) {
+        await logger.log({ level: "WARN", subsystem: "SCHEDULE", message: `Account ${key}: failed to write cycle START marker`, error: err });
+      }
     }
 
     const threads = new ThreadsClient(account.threads);
@@ -196,17 +198,19 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
       treatBlankAccountKeyAsMatch: account.isDefault
     });
 
-    try {
-      await writeAccountCycleMarker({
-        airtable,
-        runLogsTableName: config.airtable.runLogsTableName,
-        timezone: config.runtime.timezone,
-        accountKey: key,
-        event: "ACCOUNT_CYCLE_FINISH",
-        meta: { intervalHours, ingest: { newSeeds: ingestResult.newSeeds, dedupedSeeds: ingestResult.dedupedSeeds }, publish: publishResult }
-      });
-    } catch (err) {
-      await logger.log({ level: "WARN", subsystem: "SCHEDULE", message: `Account ${key}: failed to write cycle FINISH marker`, error: err });
+    if (config.runtime.runLogsAirtableEnabled) {
+      try {
+        await writeAccountCycleMarker({
+          airtable,
+          runLogsTableName: config.airtable.runLogsTableName,
+          timezone: config.runtime.timezone,
+          accountKey: key,
+          event: "ACCOUNT_CYCLE_FINISH",
+          meta: { intervalHours, ingest: { newSeeds: ingestResult.newSeeds, dedupedSeeds: ingestResult.dedupedSeeds }, publish: publishResult }
+        });
+      } catch (err) {
+        await logger.log({ level: "WARN", subsystem: "SCHEDULE", message: `Account ${key}: failed to write cycle FINISH marker`, error: err });
+      }
     }
 
     perAccount[key] = {
