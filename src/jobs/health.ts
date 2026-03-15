@@ -3,6 +3,7 @@ import { AirtableClient } from "../airtable/airtableClient.js";
 import { PostFields } from "../airtable/fields.js";
 import { Logger } from "../logger.js";
 import { TelegramClient } from "../services/telegram.js";
+import { accountKeyFilterFormula } from "../utils/airtableFormula.js";
 
 type Post = Record<string, unknown>;
 
@@ -12,11 +13,24 @@ export const healthJob = async (params: {
   logger: Logger;
   telegram?: TelegramClient;
   timezone: string;
+  accountKey?: string;
+  treatBlankAccountKeyAsMatch?: boolean;
 }) => {
   const now = DateTime.now().setZone(params.timezone);
 
+  const accountFilter =
+    params.accountKey && params.accountKey.trim()
+      ? accountKeyFilterFormula({
+          fieldName: PostFields.AccountKey,
+          accountKey: params.accountKey.trim(),
+          treatBlankAsAccount: params.treatBlankAccountKeyAsMatch
+        })
+      : undefined;
+
   const scheduled = await params.airtable.listAll<Post>(params.postsTableName, {
-    filterByFormula: `AND({${PostFields.PostStatus}}="Scheduled", {${PostFields.ScheduledAt}}!="")`,
+    filterByFormula: accountFilter
+      ? `AND(${accountFilter}, {${PostFields.PostStatus}}="Scheduled", {${PostFields.ScheduledAt}}!="")`
+      : `AND({${PostFields.PostStatus}}="Scheduled", {${PostFields.ScheduledAt}}!="")`,
     maxRecords: 50,
     fields: [PostFields.ScheduledAt, PostFields.SeedUrl]
   });
@@ -26,13 +40,17 @@ export const healthJob = async (params: {
   });
 
   const queueNonEmpty = await params.airtable.listAll<Post>(params.postsTableName, {
-    filterByFormula: `OR({${PostFields.PostStatus}}="Generated", {${PostFields.PostStatus}}="Scheduled")`,
+    filterByFormula: accountFilter
+      ? `AND(${accountFilter}, OR({${PostFields.PostStatus}}="Generated", {${PostFields.PostStatus}}="Scheduled"))`
+      : `OR({${PostFields.PostStatus}}="Generated", {${PostFields.PostStatus}}="Scheduled")`,
     maxRecords: 1,
     fields: [PostFields.PostStatus]
   });
 
   const lastPublished = await params.airtable.listAll<Post>(params.postsTableName, {
-    filterByFormula: `{${PostFields.PostStatus}}="Published"`,
+    filterByFormula: accountFilter
+      ? `AND(${accountFilter}, {${PostFields.PostStatus}}="Published")`
+      : `{${PostFields.PostStatus}}="Published"`,
     sortField: PostFields.PublishedAt,
     sortDirection: "desc",
     maxRecords: 1,
@@ -46,7 +64,7 @@ export const healthJob = async (params: {
 
   if (overdue.length === 0 && !stalePublishing) return;
 
-  const messageLines = ["CRITICAL HEALTH"];
+  const messageLines = ["CRITICAL HEALTH", params.accountKey ? `account_key: ${params.accountKey}` : undefined].filter(Boolean) as string[];
   if (overdue.length > 0) messageLines.push(`overdue_scheduled_count: ${overdue.length}`);
   if (stalePublishing)
     messageLines.push(`no_published_for_hours: ${lastPublishedAt ? Math.floor(now.diff(lastPublishedAt, "hours").hours) : "unknown"}`);

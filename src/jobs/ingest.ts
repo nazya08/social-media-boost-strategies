@@ -5,6 +5,7 @@ import { Logger } from "../logger.js";
 import { sha256Hex } from "../utils/crypto.js";
 import { normalizeForHash } from "../utils/text.js";
 import { isHttpUrl } from "../utils/url.js";
+import { accountKeyFilterFormula, escapeAirtableString } from "../utils/airtableFormula.js";
 
 type Donor = Record<string, unknown>;
 type Post = Record<string, unknown>;
@@ -62,6 +63,8 @@ export const ingestJob = async (params: {
   ctaUrl: string;
   ctaTextEn: string;
   ctaTextUa: string;
+  accountKey?: string;
+  treatBlankAccountKeyAsMatch?: boolean;
 }) => {
   const parser = new Parser();
   const createdPostRecordIds: string[] = [];
@@ -71,8 +74,20 @@ export const ingestJob = async (params: {
   let dedupedSeeds = 0;
   let errorsCount = 0;
 
+  const donorsBaseFilter = `AND({${DonorFields.Status}}="Active", {${DonorFields.FeedUrl}}!="")`;
+  const donorsAccountFilter =
+    params.accountKey && params.accountKey.trim()
+      ? accountKeyFilterFormula({
+          fieldName: DonorFields.AccountKey,
+          accountKey: params.accountKey.trim(),
+          treatBlankAsAccount: params.treatBlankAccountKeyAsMatch
+        })
+      : undefined;
+
+  const donorsFilterByFormula = donorsAccountFilter ? `AND(${donorsBaseFilter}, ${donorsAccountFilter})` : donorsBaseFilter;
+
   const donors = await params.airtable.listAll<Donor>(params.donorsTableName, {
-    filterByFormula: `AND({${DonorFields.Status}}="Active", {${DonorFields.FeedUrl}}!="")`,
+    filterByFormula: donorsFilterByFormula,
     maxRecords: 50
   });
   donorsCount = donors.length;
@@ -115,8 +130,18 @@ export const ingestJob = async (params: {
         const seedHash = sha256Hex(hashInput);
 
         if (link) {
+          const urlFilter = `{${PostFields.SeedUrl}}="${escapeAirtableString(link)}"`;
+          const accountFilter =
+            params.accountKey && params.accountKey.trim()
+              ? accountKeyFilterFormula({
+                  fieldName: PostFields.AccountKey,
+                  accountKey: params.accountKey.trim(),
+                  treatBlankAsAccount: params.treatBlankAccountKeyAsMatch
+                })
+              : undefined;
+          const filterByFormula = accountFilter ? `AND(${urlFilter}, ${accountFilter})` : urlFilter;
           const existingByUrl = await params.airtable.listAll<Post>(params.postsTableName, {
-            filterByFormula: `{${PostFields.SeedUrl}}="${link.replace(/"/g, '\\"')}"`,
+            filterByFormula,
             maxRecords: 1
           });
           if (existingByUrl.length > 0) {
@@ -125,8 +150,19 @@ export const ingestJob = async (params: {
           }
         }
 
+        const hashFilter = `{${PostFields.SeedHash}}="${escapeAirtableString(seedHash)}"`;
+        const accountFilter =
+          params.accountKey && params.accountKey.trim()
+            ? accountKeyFilterFormula({
+                fieldName: PostFields.AccountKey,
+                accountKey: params.accountKey.trim(),
+                treatBlankAsAccount: params.treatBlankAccountKeyAsMatch
+              })
+            : undefined;
+        const hashFilterByFormula = accountFilter ? `AND(${hashFilter}, ${accountFilter})` : hashFilter;
+
         const existing = await params.airtable.listAll<Post>(params.postsTableName, {
-          filterByFormula: `{${PostFields.SeedHash}}="${seedHash}"`,
+          filterByFormula: hashFilterByFormula,
           maxRecords: 1
         });
         if (existing.length > 0) {
@@ -141,6 +177,7 @@ export const ingestJob = async (params: {
           [PostFields.SeedPublishedAt]: publishedAt || undefined,
           [PostFields.SeedAuthor]: username || undefined,
           [PostFields.SeedHash]: seedHash,
+          ...(params.accountKey ? { [PostFields.AccountKey]: params.accountKey } : {}),
           [PostFields.PostStatus]: "Seeded",
           [PostFields.Language]: donorLanguage,
           [PostFields.CtaText]: donorLanguage === "EN" ? params.ctaTextEn : params.ctaTextUa,
