@@ -33,12 +33,16 @@ export const loadThreadsAccounts = (config: AppConfig): ThreadsAccountConfig[] =
   const additionalKeys = additionalRaw.map(normalizeAccountKey);
 
   const defaultKey = normalizeAccountKey(process.env.THREADS_DEFAULT_ACCOUNT_KEY ?? "DEFAULT");
+  const defaultIntervalHours =
+    intFromEnv(process.env[`THREADS_INTERVAL_HOURS_${defaultKey}`]) ??
+    intFromEnv(process.env[`THREADS_ACCOUNT_INTERVAL_HOURS_${defaultKey}`]) ??
+    config.runtime.intervalHours;
 
   const accounts: ThreadsAccountConfig[] = [
     {
       key: defaultKey,
       isDefault: true,
-      intervalHours: config.runtime.intervalHours,
+      intervalHours: defaultIntervalHours,
       threads: {
         accessToken: config.threads.accessToken,
         userId: config.threads.userId,
@@ -79,4 +83,3 @@ export const loadThreadsAccounts = (config: AppConfig): ThreadsAccountConfig[] =
 
   return accounts;
 };
-
