@@ -49,7 +49,7 @@ const main = async () => {
     runLogsTableName: config.airtable.runLogsTableName,
     timezone: config.runtime.timezone,
     airtableEnabled: config.runtime.runLogsAirtableEnabled,
-    minLevel: config.runtime.runLogsMinLevel
+    airtableMinLevel: config.logging.runLogsMinLevel
   });
 
   const anthropic = new AnthropicClient({ apiKey: config.anthropic.apiKey, model: config.anthropic.model });

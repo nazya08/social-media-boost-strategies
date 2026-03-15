@@ -26,6 +26,9 @@ export const ConfigSchema = z.object({
     donorsTableName: z.string().min(1).default("Threads Donors"),
     runLogsTableName: z.string().min(1).default("Run Logs")
   }),
+  logging: z.object({
+    runLogsMinLevel: z.enum(["INFO", "WARN", "ERROR", "CRITICAL"]).default("WARN")
+  }),
   threads: z.object({
     accessToken: z.string().min(1),
     userId: z.string().min(1),
@@ -73,7 +76,6 @@ export const ConfigSchema = z.object({
     promptThreadInterPartDelayMs: z.number().int().min(0).max(300000).default(5000),
     promptThreadReplyRetryDelayMs: z.number().int().min(0).max(300000).default(20000),
     runLogsAirtableEnabled: z.boolean().default(true),
-    runLogsMinLevel: z.enum(["INFO", "WARN", "ERROR", "CRITICAL"]).default("WARN"),
     runLogsCleanupThresholdRecords: z.number().int().min(0).max(1000).default(900),
     runLogsCleanupTrimToRecords: z.number().int().min(0).max(1000).default(700)
   })
@@ -98,6 +100,9 @@ export const loadConfig = (): AppConfig => {
       postsTableName: process.env.AIRTABLE_TABLE_NAME ?? "Posts",
       donorsTableName: process.env.AIRTABLE_DONORS_TABLE_NAME ?? "Threads Donors",
       runLogsTableName: process.env.AIRTABLE_RUN_LOGS_TABLE_NAME ?? "Run Logs"
+    },
+    logging: {
+      runLogsMinLevel: logLevelFromEnv(process.env.RUN_LOGS_MIN_LEVEL, "WARN")
     },
     threads: {
       accessToken: process.env.THREADS_ACCESS_TOKEN,
@@ -144,7 +149,6 @@ export const loadConfig = (): AppConfig => {
       promptThreadInterPartDelayMs: intFromEnv(process.env.PROMPT_THREAD_INTER_PART_DELAY_MS, 5000),
       promptThreadReplyRetryDelayMs: intFromEnv(process.env.PROMPT_THREAD_REPLY_RETRY_DELAY_MS, 20000),
       runLogsAirtableEnabled: boolFromEnv(process.env.RUN_LOGS_AIRTABLE_ENABLED, true),
-      runLogsMinLevel: logLevelFromEnv(process.env.RUN_LOGS_MIN_LEVEL, "WARN"),
       runLogsCleanupThresholdRecords: intFromEnv(process.env.RUN_LOGS_CLEANUP_THRESHOLD_RECORDS, 900),
       runLogsCleanupTrimToRecords: intFromEnv(process.env.RUN_LOGS_CLEANUP_TRIM_TO_RECORDS, 700)
     }

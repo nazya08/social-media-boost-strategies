@@ -10,7 +10,7 @@ export type LoggerOptions = {
   runLogsTableName: string;
   timezone: string;
   airtableEnabled?: boolean;
-  minLevel?: LogLevel;
+  airtableMinLevel?: LogLevel;
 };
 
 export class Logger {
@@ -51,12 +51,13 @@ export class Logger {
       console.log(line);
     }
 
+    // Best-effort Airtable run log (never throws)
     const airtableEnabled = this.options.airtableEnabled ?? true;
-    const minLevel = this.options.minLevel ?? "WARN";
     if (!airtableEnabled) return;
+
+    const minLevel = this.options.airtableMinLevel ?? "WARN";
     if (this.levelPriority(params.level) < this.levelPriority(minLevel)) return;
 
-    // Best-effort Airtable run log (never throws)
     try {
       await this.options.airtable.createRecord(this.options.runLogsTableName, {
         [RunLogFields.Timestamp]: timestamp,
