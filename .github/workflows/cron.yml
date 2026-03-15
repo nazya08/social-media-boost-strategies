@@ -2,7 +2,8 @@ name: Trigger Vercel Cron
 
 on:
   schedule:
-    - cron: "0 */2 * * *"
+    - cron: "0 */2 * * *"   # DEFAULT account
+    - cron: "30 */3 * * *"  # AI_BUILDERS_LAB account
   workflow_dispatch: {}
 
 jobs:
@@ -19,7 +20,16 @@ jobs:
             echo "Missing secret: CRON_URL"
             exit 1
           fi
-          curl -fsS "$CRON_URL" \
+
+          ACCOUNTS="DEFAULT"
+          if [ "${{ github.event.schedule }}" = "30 */3 * * *" ]; then
+            ACCOUNTS="AI_BUILDERS_LAB"
+          fi
+
+          URL="$CRON_URL"
+          SEP="?"
+          if echo "$URL" | grep -q "?"; then SEP="&"; fi
+
+          curl -fsS "${URL}${SEP}accounts=${ACCOUNTS}" \
             -H "x-cron-secret: $CRON_SECRET" \
             -H "content-type: application/json"
-

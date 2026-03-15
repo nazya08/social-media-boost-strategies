@@ -81,5 +81,13 @@ export const loadThreadsAccounts = (config: AppConfig): ThreadsAccountConfig[] =
     });
   }
 
-  return accounts;
+  const onlyRaw = parseCsv(process.env.THREADS_RUN_ONLY_ACCOUNTS);
+  const onlyKeys = onlyRaw.map(normalizeAccountKey);
+  if (onlyKeys.length === 0) return accounts;
+
+  const filtered = accounts.filter((a) => onlyKeys.includes(a.key));
+  if (filtered.length === 0) {
+    throw new Error(`THREADS_RUN_ONLY_ACCOUNTS did not match any configured account keys: ${onlyKeys.join(", ")}`);
+  }
+  return filtered;
 };
