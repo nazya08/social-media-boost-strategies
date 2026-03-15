@@ -34,7 +34,8 @@ const main = async () => {
   const logger = new Logger({
     airtable,
     runLogsTableName: config.airtable.runLogsTableName,
-    timezone: config.runtime.timezone
+    timezone: config.runtime.timezone,
+    airtableMinLevel: config.logging.runLogsMinLevel
   });
 
   const anthropic = new AnthropicClient({ apiKey: config.anthropic.apiKey, model: config.anthropic.model });

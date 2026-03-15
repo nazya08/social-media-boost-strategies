@@ -20,6 +20,9 @@ export const ConfigSchema = z.object({
     donorsTableName: z.string().min(1).default("Threads Donors"),
     runLogsTableName: z.string().min(1).default("Run Logs")
   }),
+  logging: z.object({
+    runLogsMinLevel: z.enum(["INFO", "WARN", "ERROR", "CRITICAL"]).default("WARN")
+  }),
   threads: z.object({
     accessToken: z.string().min(1),
     userId: z.string().min(1),
@@ -88,6 +91,9 @@ export const loadConfig = (): AppConfig => {
       postsTableName: process.env.AIRTABLE_TABLE_NAME ?? "Posts",
       donorsTableName: process.env.AIRTABLE_DONORS_TABLE_NAME ?? "Threads Donors",
       runLogsTableName: process.env.AIRTABLE_RUN_LOGS_TABLE_NAME ?? "Run Logs"
+    },
+    logging: {
+      runLogsMinLevel: (process.env.RUN_LOGS_MIN_LEVEL ?? "WARN").trim().toUpperCase()
     },
     threads: {
       accessToken: process.env.THREADS_ACCESS_TOKEN,

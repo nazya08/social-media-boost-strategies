@@ -9,6 +9,7 @@ export type LoggerOptions = {
   airtable: AirtableClient;
   runLogsTableName: string;
   timezone: string;
+  airtableMinLevel?: LogLevel;
 };
 
 export class Logger {
@@ -37,6 +38,10 @@ export class Logger {
     }
 
     // Best-effort Airtable run log (never throws)
+    const minLevel = this.options.airtableMinLevel ?? "WARN";
+    const levelOrder: Record<LogLevel, number> = { INFO: 10, WARN: 20, ERROR: 30, CRITICAL: 40 };
+    if (levelOrder[params.level] < levelOrder[minLevel]) return;
+
     try {
       await this.options.airtable.createRecord(this.options.runLogsTableName, {
         [RunLogFields.Timestamp]: timestamp,
