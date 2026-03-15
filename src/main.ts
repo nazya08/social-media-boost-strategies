@@ -8,6 +8,7 @@ import { ingestJob } from "./jobs/ingest.js";
 import { generateJob } from "./jobs/generate.js";
 import { publishNowJob } from "./jobs/publishNow.js";
 import { healthJob } from "./jobs/health.js";
+import { runLogsCleanupJob } from "./jobs/runLogsCleanup.js";
 import { DateTime } from "luxon";
 
 const createExclusiveRunner = <T>(fn: () => Promise<T>) => {
@@ -31,10 +32,24 @@ const main = async () => {
     baseId: config.airtable.baseId
   });
 
+  try {
+    await runLogsCleanupJob({
+      airtable,
+      runLogsTableName: config.airtable.runLogsTableName,
+      thresholdRecords: config.runtime.runLogsCleanupThresholdRecords,
+      trimToRecords: config.runtime.runLogsCleanupTrimToRecords
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[RUN_LOGS] Cleanup failed:", err);
+  }
+
   const logger = new Logger({
     airtable,
     runLogsTableName: config.airtable.runLogsTableName,
-    timezone: config.runtime.timezone
+    timezone: config.runtime.timezone,
+    airtableEnabled: config.runtime.runLogsAirtableEnabled,
+    minLevel: config.runtime.runLogsMinLevel
   });
 
   const anthropic = new AnthropicClient({ apiKey: config.anthropic.apiKey, model: config.anthropic.model });
