@@ -143,5 +143,16 @@ export class AirtableClient {
       body: JSON.stringify({ fields })
     });
   }
-}
 
+  async deleteRecords(tableName: string, recordIds: string[]): Promise<void> {
+    if (recordIds.length === 0) return;
+    // Airtable supports bulk delete up to 10 records per request.
+    const encodedTable = encodeURIComponent(tableName);
+    const url = new URL(`${AIRTABLE_API_BASE}/${this.baseId}/${encodedTable}`);
+    for (const id of recordIds.slice(0, 10)) {
+      url.searchParams.append("records[]", id);
+    }
+
+    await this.request(url, { method: "DELETE" });
+  }
+}

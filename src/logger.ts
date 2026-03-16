@@ -9,11 +9,25 @@ export type LoggerOptions = {
   airtable: AirtableClient;
   runLogsTableName: string;
   timezone: string;
+  airtableEnabled?: boolean;
   airtableMinLevel?: LogLevel;
 };
 
 export class Logger {
   constructor(private readonly options: LoggerOptions) {}
+
+  private levelPriority(level: LogLevel) {
+    switch (level) {
+      case "INFO":
+        return 10;
+      case "WARN":
+        return 20;
+      case "ERROR":
+        return 30;
+      case "CRITICAL":
+        return 40;
+    }
+  }
 
   async log(params: {
     level: LogLevel;
@@ -38,9 +52,11 @@ export class Logger {
     }
 
     // Best-effort Airtable run log (never throws)
+    const airtableEnabled = this.options.airtableEnabled ?? true;
+    if (!airtableEnabled) return;
+
     const minLevel = this.options.airtableMinLevel ?? "WARN";
-    const levelOrder: Record<LogLevel, number> = { INFO: 10, WARN: 20, ERROR: 30, CRITICAL: 40 };
-    if (levelOrder[params.level] < levelOrder[minLevel]) return;
+    if (this.levelPriority(params.level) < this.levelPriority(minLevel)) return;
 
     try {
       await this.options.airtable.createRecord(this.options.runLogsTableName, {
@@ -58,4 +74,3 @@ export class Logger {
     }
   }
 }
-

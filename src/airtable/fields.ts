@@ -11,6 +11,7 @@ export const PostFields = {
   SeedPublishedAt: "Seed Published At",
   SeedAuthor: "Seed Author",
   SeedHash: "Seed Hash",
+  AccountKey: "Account Key",
   MediaUrl: "Media URL",
   MediaType: "Media Type",
   MediaAltText: "Media Alt Text",
@@ -41,6 +42,7 @@ export const DonorFields = {
   FeedUrl: "Feed URL",
   Status: "Status",
   Language: "Language",
+  AccountKey: "Account Key",
   LastFetchedAt: "Last Fetched At",
   Notes: "Notes"
 } as const;

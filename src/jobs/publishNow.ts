@@ -7,6 +7,7 @@ import { TelegramClient } from "../services/telegram.js";
 import { formatPublishProgress, parsePublishProgress, PublishProgress } from "../utils/publishProgress.js";
 import { safeJsonParse } from "../utils/text.js";
 import { isHttpUrl } from "../utils/url.js";
+import { accountKeyFilterFormula } from "../utils/airtableFormula.js";
 
 type Post = Record<string, unknown>;
 
@@ -35,6 +36,8 @@ export const publishNowJob = async (params: {
   ctaUrlOverride?: string;
   promptThreadInterPartDelayMs?: number;
   promptThreadReplyRetryDelayMs?: number;
+  accountKey?: string;
+  treatBlankAccountKeyAsMatch?: boolean;
 }): Promise<{ attempted: number; published: number; failed: number; criticalAlerts: number }> => {
   if (!params.autopublishEnabled) {
     await params.logger.log({ level: "INFO", subsystem: "PUBLISH", message: "PublishNow: AUTOPUBLISH_ENABLED=false; skipping" });
@@ -48,14 +51,27 @@ export const publishNowJob = async (params: {
   const publishingWithProgress = `AND({${PostFields.PostStatus}}="Publishing", {${PostFields.Error}}!="", LEFT({${PostFields.Error}}, 9)="PROGRESS:")`;
   const publishingWithRootId = `AND({${PostFields.PostStatus}}="Publishing", {${PostFields.ThreadsRootId}}!="")`;
   const basePublishable = `OR(${publishingWithProgress}, ${publishingWithRootId}, {${PostFields.PostStatus}}="Generated", AND({${PostFields.PostStatus}}="Failed", {${PostFields.FailureSubsystem}}="PUBLISH", {${PostFields.AttemptCount}}<3, NOT(REGEX_MATCH({${PostFields.Error}}, "HTTP 401|HTTP 403"))))`;
-  const filterByFormula = idsFilter ? `AND(${idsFilter}, ${basePublishable})` : basePublishable;
+
+  const accountFilter =
+    params.accountKey && params.accountKey.trim()
+      ? accountKeyFilterFormula({
+          fieldName: PostFields.AccountKey,
+          accountKey: params.accountKey.trim(),
+          treatBlankAsAccount: params.treatBlankAccountKeyAsMatch
+        })
+      : undefined;
+
+  const extraFilters = [idsFilter, accountFilter].filter(Boolean);
+  const filterByFormula = extraFilters.length > 0 ? `AND(${extraFilters.join(", ")}, ${basePublishable})` : basePublishable;
 
   const now = DateTime.now().setZone(params.timezone);
 
   // Recover posts stuck in Publishing (typically due to runtime timeout mid-thread).
   try {
+    const stuckBase = `AND({${PostFields.PostStatus}}="Publishing", {${PostFields.LastAttemptAt}}!="")`;
+    const stuckFilter = accountFilter ? `AND(${accountFilter}, ${stuckBase})` : stuckBase;
     const stuck = await params.airtable.listAll<Post>(params.postsTableName, {
-      filterByFormula: `AND({${PostFields.PostStatus}}="Publishing", {${PostFields.LastAttemptAt}}!="")`,
+      filterByFormula: stuckFilter,
       maxRecords: 20,
       fields: [PostFields.LastAttemptAt, PostFields.AttemptCount, PostFields.Error, PostFields.ThreadsRootId]
     });

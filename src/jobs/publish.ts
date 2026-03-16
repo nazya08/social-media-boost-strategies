@@ -6,6 +6,7 @@ import { ThreadsClient } from "../services/threads.js";
 import { TelegramClient } from "../services/telegram.js";
 import { safeJsonParse } from "../utils/text.js";
 import { isHttpUrl } from "../utils/url.js";
+import { accountKeyFilterFormula } from "../utils/airtableFormula.js";
 
 type Post = Record<string, unknown>;
 
@@ -29,13 +30,25 @@ export const publishJob = async (params: {
   maxCharsPerPart: number;
   autopublishEnabled: boolean;
   postMediaEnabled: boolean;
+  accountKey?: string;
+  treatBlankAccountKeyAsMatch?: boolean;
 }) => {
   if (!params.autopublishEnabled) return;
 
   const now = DateTime.now().setZone(params.timezone);
+  const accountFilter =
+    params.accountKey && params.accountKey.trim()
+      ? accountKeyFilterFormula({
+          fieldName: PostFields.AccountKey,
+          accountKey: params.accountKey.trim(),
+          treatBlankAsAccount: params.treatBlankAccountKeyAsMatch
+        })
+      : undefined;
 
   const scheduled = await params.airtable.listAll<Post>(params.postsTableName, {
-    filterByFormula: `AND({${PostFields.PostStatus}}="Scheduled", {${PostFields.ScheduledAt}}!="")`,
+    filterByFormula: accountFilter
+      ? `AND(${accountFilter}, {${PostFields.PostStatus}}="Scheduled", {${PostFields.ScheduledAt}}!="")`
+      : `AND({${PostFields.PostStatus}}="Scheduled", {${PostFields.ScheduledAt}}!="")`,
     maxRecords: 20,
     fields: [
       PostFields.ScheduledAt,
