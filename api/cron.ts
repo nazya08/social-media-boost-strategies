@@ -1,4 +1,4 @@
-import { runOnce } from "../dist/runOnce.js";
+import { runOnce } from "../src/runOnce.js";
 
 export default async function handler(_req: any, res: any) {
   try {
