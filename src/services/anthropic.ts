@@ -26,6 +26,15 @@ type AnthropicClientOptions = {
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
+const countMatches = (text: string, re: RegExp) => (String(text ?? "").match(re) ?? []).length;
+
+const isLikelyUkrainian = (text: string) => {
+  const sample = String(text ?? "").slice(0, 5000);
+  const cyrillic = countMatches(sample, /[\u0400-\u04FF]/g);
+  const latin = countMatches(sample, /[A-Za-z]/g);
+  return cyrillic >= Math.max(30, latin);
+};
+
 export class AnthropicClient {
   constructor(private readonly options: AnthropicClientOptions) {}
 
@@ -77,7 +86,74 @@ export class AnthropicClient {
       .filter(Boolean)
       .join("\n");
 
-    const system = input.language === "EN" ? baseRulesEn : baseRulesUa;
+    const system =
+      input.language === "EN"
+        ? baseRulesEn
+        : [
+            baseRulesUa,
+            "",
+            "IMPORTANT: Output must be Ukrainian. Translate ALL list items/prompts into Ukrainian. Do not output English sentences (brand names/URLs are ok)."
+          ].join("\n");
+
+    const callAnthropic = async (systemText: string): Promise<GeneratedThread> => {
+      const payload = {
+        model: this.options.model,
+        max_tokens: 2200,
+        temperature: 0.5,
+        system: systemText,
+        tools: [submitThreadTool],
+        tool_choice: { type: "tool", name: "submit_thread" },
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: `${userSeed}\n\nUse the tool \`submit_thread\` to return the result. parts: root first, CTA last.`
+              }
+            ]
+          }
+        ]
+      };
+
+      const res = await fetch(ANTHROPIC_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": this.options.apiKey,
+          "anthropic-version": "2023-06-01"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const text = await res.text();
+      if (!res.ok) throw new Error(`Anthropic HTTP ${res.status}: ${text}`);
+      const data = JSON.parse(text) as any;
+
+      const toolUse = Array.isArray(data?.content)
+        ? data.content.find((c: any) => c && c.type === "tool_use" && c.name === "submit_thread")
+        : undefined;
+      const toolInput = toolUse?.input;
+
+      let parsed: GeneratedThread | undefined;
+      if (toolInput && typeof toolInput === "object") {
+        parsed = toolInput as GeneratedThread;
+      } else {
+        const contentText = data?.content?.find?.((c: any) => c.type === "text")?.text ?? "";
+        const firstBrace = contentText.indexOf("{");
+        const lastBrace = contentText.lastIndexOf("}");
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+          const jsonSlice = contentText.slice(firstBrace, lastBrace + 1);
+          parsed = JSON.parse(jsonSlice) as GeneratedThread;
+        }
+      }
+
+      if (!parsed || !Array.isArray((parsed as any).parts) || parsed.parts.length < 2) {
+        throw new Error("Anthropic returned invalid structured output.");
+      }
+
+      return parsed;
+    };
 
     const submitThreadTool = {
       name: "submit_thread",
@@ -94,68 +170,25 @@ export class AnthropicClient {
       }
     } as const;
 
-    const payload = {
-      model: this.options.model,
-      max_tokens: 2200,
-      temperature: 0.5,
-      system,
-      tools: [submitThreadTool],
-      tool_choice: { type: "tool", name: "submit_thread" },
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `${userSeed}\n\nUse the tool \`submit_thread\` to return the result. parts: root first, CTA last.`
-            }
-          ]
-        }
-      ]
-    };
-
-    const res = await fetch(ANTHROPIC_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": this.options.apiKey,
-        "anthropic-version": "2023-06-01"
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const text = await res.text();
-    if (!res.ok) throw new Error(`Anthropic HTTP ${res.status}: ${text}`);
-    const data = JSON.parse(text) as any;
-
-    const toolUse = Array.isArray(data?.content)
-      ? data.content.find((c: any) => c && c.type === "tool_use" && c.name === "submit_thread")
-      : undefined;
-    const toolInput = toolUse?.input;
-
-    let parsed: GeneratedThread | undefined;
-    if (toolInput && typeof toolInput === "object") {
-      parsed = toolInput as GeneratedThread;
-    } else {
-      // Fallback: try to recover from text response if tools are not returned
-      const contentText = data?.content?.find?.((c: any) => c.type === "text")?.text ?? "";
-      const firstBrace = contentText.indexOf("{");
-      const lastBrace = contentText.lastIndexOf("}");
-      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-        const jsonSlice = contentText.slice(firstBrace, lastBrace + 1);
-        parsed = JSON.parse(jsonSlice) as GeneratedThread;
-      }
-    }
-
-    if (!parsed || !Array.isArray((parsed as any).parts) || parsed.parts.length < 2) {
-      throw new Error("Anthropic returned invalid structured output.");
-    }
-
-    const sanitizedParts = parsed.parts.map((p: string) => clamp(String(p ?? ""), input.maxCharsPerPart).trim());
+    let parsed = await callAnthropic(system);
+    let sanitizedParts = parsed.parts.map((p: string) => clamp(String(p ?? ""), input.maxCharsPerPart).trim());
     const expectedCta = `${input.ctaText} ${input.ctaUrl}`.trim();
     const last = sanitizedParts[sanitizedParts.length - 1] ?? "";
     if (!last.includes(input.ctaUrl)) {
       sanitizedParts[sanitizedParts.length - 1] = expectedCta;
+    }
+
+    if (input.language === "UA") {
+      const withoutCta = sanitizedParts.slice(0, -1).join("\n");
+      if (!isLikelyUkrainian(withoutCta)) {
+        const strictSystem = [system, "", "STRICT MODE: Rewrite EVERYTHING into Ukrainian. Translate all list items/prompts into Ukrainian. Do not output English sentences."].join("\n");
+        parsed = await callAnthropic(strictSystem);
+        sanitizedParts = parsed.parts.map((p: string) => clamp(String(p ?? ""), input.maxCharsPerPart).trim());
+        const retryLast = sanitizedParts[sanitizedParts.length - 1] ?? "";
+        if (!retryLast.includes(input.ctaUrl)) {
+          sanitizedParts[sanitizedParts.length - 1] = expectedCta;
+        }
+      }
     }
 
     return {
