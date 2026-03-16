@@ -136,7 +136,7 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
       autopublishEnabled: config.runtime.autopublishEnabled,
       postMediaEnabled: config.runtime.postMediaEnabled,
       maxToPublish: config.runtime.publishMaxPerRun,
-      ctaUrlOverride: config.runtime.ctaUrl,
+      ctaUrlOverride: accountCtaUrl,
       promptThreadInterPartDelayMs: config.runtime.promptThreadInterPartDelayMs,
       promptThreadReplyRetryDelayMs: config.runtime.promptThreadReplyRetryDelayMs,
       accountKey: key,
