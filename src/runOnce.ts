@@ -89,6 +89,8 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
   for (const account of accounts) {
     const key = account.key;
 
+    const accountCtaUrl = String(process.env[`CTA_URL_${key}`] ?? "").trim() || config.runtime.ctaUrl;
+
     const threads = new ThreadsClient(account.threads);
 
     const ingestResult = await ingestJob({
@@ -98,7 +100,7 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
       logger,
       timezone: config.runtime.timezone,
       maxItemsPerDonor: config.runtime.ingestMaxItemsPerDonor,
-      ctaUrl: config.runtime.ctaUrl,
+      ctaUrl: accountCtaUrl,
       ctaTextEn: config.runtime.ctaTextEn,
       ctaTextUa: config.runtime.ctaTextUa,
       accountKey: key,
@@ -117,7 +119,7 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
         partsTargetMax: config.runtime.partsTargetMax,
         maxRecords: config.runtime.generateMaxRecords,
         recordIds,
-        ctaUrlOverride: config.runtime.ctaUrl,
+        ctaUrlOverride: accountCtaUrl,
         ctaTextEnOverride: config.runtime.ctaTextEn,
         ctaTextUaOverride: config.runtime.ctaTextUa
       });
