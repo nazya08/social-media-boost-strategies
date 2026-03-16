@@ -159,7 +159,7 @@ export const publishNowJob = async (params: {
       const updated = parts.slice();
       const idx = updated.length - 1;
       const last = String(updated[idx] ?? "").trim();
-      const tmeRegex = /https?:\/\/t\.me\/[A-Za-z0-9_]+/g;
+      const tmeRegex = /\b(?:https?:\/\/)?t\.me\/[A-Za-z0-9_]+\b/g;
       if (tmeRegex.test(last)) {
         updated[idx] = last.replace(tmeRegex, url);
       } else if (!last.includes(url)) {
