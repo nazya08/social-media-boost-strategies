@@ -11,6 +11,11 @@ export default async function handler(_req: any, res: any) {
     } catch {
       // ignore
     }
+
+    // Safety default: when multiple accounts are configured, run DEFAULT unless explicitly requested via `?accounts=`.
+    if (!runOnlyAccounts) {
+      runOnlyAccounts = String(process.env.THREADS_DEFAULT_ACCOUNT_KEY ?? "DEFAULT").trim() || "DEFAULT";
+    }
     if (secret) {
       const headerSecret = String(_req?.headers?.["x-cron-secret"] ?? "").trim();
       let querySecret = "";
