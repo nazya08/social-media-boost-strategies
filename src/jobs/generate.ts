@@ -12,6 +12,7 @@ import {
   rootHasSwapLines
 } from "../utils/listSeed.js";
 import { toPreview } from "../utils/text.js";
+import { accountKeyFilterFormula } from "../utils/airtableFormula.js";
 
 type Post = Record<string, unknown>;
 
@@ -156,6 +157,8 @@ export const generateJob = async (params: {
   ctaUrlOverride?: string;
   ctaTextEnOverride?: string;
   ctaTextUaOverride?: string;
+  accountKey?: string;
+  treatBlankAccountKeyAsMatch?: boolean;
 }) => {
   let processed = 0;
   let generatedCount = 0;
@@ -166,7 +169,17 @@ export const generateJob = async (params: {
     params.recordIds && params.recordIds.length > 0
       ? `OR(${params.recordIds.map((id) => `RECORD_ID()="${id}"`).join(",")})`
       : undefined;
-  const filterByFormula = idsFilter ? `AND(${idsFilter}, ${baseFilter})` : baseFilter;
+  const accountFilter =
+    params.accountKey && params.accountKey.trim()
+      ? accountKeyFilterFormula({
+          fieldName: PostFields.AccountKey,
+          accountKey: params.accountKey.trim(),
+          treatBlankAsAccount: params.treatBlankAccountKeyAsMatch
+        })
+      : undefined;
+
+  const extraFilters = [idsFilter, accountFilter].filter(Boolean);
+  const filterByFormula = extraFilters.length > 0 ? `AND(${extraFilters.join(", ")}, ${baseFilter})` : baseFilter;
 
   const posts = await params.airtable.listAll<Post>(params.postsTableName, {
     filterByFormula,
@@ -180,8 +193,7 @@ export const generateJob = async (params: {
     const seedUrl = String(post.fields?.[PostFields.SeedUrl] ?? "") || undefined;
     const langRaw = String(post.fields?.[PostFields.Language] ?? "UA").trim().toUpperCase();
     const configuredLanguage = langRaw === "EN" ? ("EN" as const) : ("UA" as const);
-    const inferredLanguage = detectLanguage(`${seedTitle}\n${seedText}`);
-    const language = configuredLanguage === "UA" && inferredLanguage === "EN" ? ("EN" as const) : configuredLanguage;
+    const language = configuredLanguage;
 
     const configuredCtaUrl = params.ctaUrlOverride ?? String(post.fields?.[PostFields.CtaUrl] ?? "");
     const ctaUrl = configuredCtaUrl || "https://t.me/solutions_247ai";

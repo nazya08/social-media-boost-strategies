@@ -108,24 +108,22 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
     });
 
     const recordIds = ingestResult.createdPostRecordIds;
-    if (recordIds.length > 0) {
-      await generateJob({
-        airtable,
-        postsTableName: config.airtable.postsTableName,
-        logger,
-        anthropic,
-        maxCharsPerPart: config.runtime.threadPartMaxChars,
-        partsTargetMin: config.runtime.partsTargetMin,
-        partsTargetMax: config.runtime.partsTargetMax,
-        maxRecords: config.runtime.generateMaxRecords,
-        recordIds,
-        ctaUrlOverride: accountCtaUrl,
-        ctaTextEnOverride: config.runtime.ctaTextEn,
-        ctaTextUaOverride: config.runtime.ctaTextUa
-      });
-    } else {
-      await logger.log({ level: "INFO", subsystem: "GENERATE", message: `Account ${key}: no new seeds to generate` });
-    }
+    await generateJob({
+      airtable,
+      postsTableName: config.airtable.postsTableName,
+      logger,
+      anthropic,
+      maxCharsPerPart: config.runtime.threadPartMaxChars,
+      partsTargetMin: config.runtime.partsTargetMin,
+      partsTargetMax: config.runtime.partsTargetMax,
+      maxRecords: config.runtime.generateMaxRecords,
+      ...(recordIds.length > 0 ? { recordIds } : {}),
+      ctaUrlOverride: accountCtaUrl,
+      ctaTextEnOverride: config.runtime.ctaTextEn,
+      ctaTextUaOverride: config.runtime.ctaTextUa,
+      accountKey: key,
+      treatBlankAccountKeyAsMatch: account.isDefault
+    });
 
     const publishResult = await publishNowJob({
       airtable,
