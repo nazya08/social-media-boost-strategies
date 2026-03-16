@@ -89,90 +89,102 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
   for (const account of accounts) {
     const key = account.key;
 
-    const accountCtaUrl = String(process.env[`CTA_URL_${key}`] ?? "").trim() || config.runtime.ctaUrl;
+    try {
+      const accountCtaUrl = String(process.env[`CTA_URL_${key}`] ?? "").trim() || config.runtime.ctaUrl;
 
-    const threads = new ThreadsClient(account.threads);
+      const threads = new ThreadsClient(account.threads);
 
-    const ingestResult = await ingestJob({
-      airtable,
-      donorsTableName: config.airtable.donorsTableName,
-      postsTableName: config.airtable.postsTableName,
-      logger,
-      timezone: config.runtime.timezone,
-      maxItemsPerDonor: config.runtime.ingestMaxItemsPerDonor,
-      ctaUrl: accountCtaUrl,
-      ctaTextEn: config.runtime.ctaTextEn,
-      ctaTextUa: config.runtime.ctaTextUa,
-      accountKey: key,
-      treatBlankAccountKeyAsMatch: account.isDefault
-    });
+      const ingestResult = await ingestJob({
+        airtable,
+        donorsTableName: config.airtable.donorsTableName,
+        postsTableName: config.airtable.postsTableName,
+        logger,
+        timezone: config.runtime.timezone,
+        maxItemsPerDonor: config.runtime.ingestMaxItemsPerDonor,
+        ctaUrl: accountCtaUrl,
+        ctaTextEn: config.runtime.ctaTextEn,
+        ctaTextUa: config.runtime.ctaTextUa,
+        accountKey: key,
+        treatBlankAccountKeyAsMatch: account.isDefault
+      });
 
-    const recordIds = ingestResult.createdPostRecordIds;
-    await generateJob({
-      airtable,
-      postsTableName: config.airtable.postsTableName,
-      logger,
-      anthropic,
-      maxCharsPerPart: config.runtime.threadPartMaxChars,
-      partsTargetMin: config.runtime.partsTargetMin,
-      partsTargetMax: config.runtime.partsTargetMax,
-      maxRecords: config.runtime.generateMaxRecords,
-      ...(recordIds.length > 0 ? { recordIds } : {}),
-      ctaUrlOverride: accountCtaUrl,
-      ctaTextEnOverride: config.runtime.ctaTextEn,
-      ctaTextUaOverride: config.runtime.ctaTextUa,
-      accountKey: key,
-      treatBlankAccountKeyAsMatch: account.isDefault
-    });
+      const recordIds = ingestResult.createdPostRecordIds;
+      await generateJob({
+        airtable,
+        postsTableName: config.airtable.postsTableName,
+        logger,
+        anthropic,
+        maxCharsPerPart: config.runtime.threadPartMaxChars,
+        partsTargetMin: config.runtime.partsTargetMin,
+        partsTargetMax: config.runtime.partsTargetMax,
+        maxRecords: config.runtime.generateMaxRecords,
+        ...(recordIds.length > 0 ? { recordIds } : {}),
+        ctaUrlOverride: accountCtaUrl,
+        ctaTextEnOverride: config.runtime.ctaTextEn,
+        ctaTextUaOverride: config.runtime.ctaTextUa,
+        accountKey: key,
+        treatBlankAccountKeyAsMatch: account.isDefault
+      });
 
-    const publishResult = await publishNowJob({
-      airtable,
-      postsTableName: config.airtable.postsTableName,
-      logger,
-      threads,
-      telegram,
-      timezone: config.runtime.timezone,
-      maxCharsPerPart: config.runtime.threadPartMaxChars,
-      autopublishEnabled: config.runtime.autopublishEnabled,
-      postMediaEnabled: config.runtime.postMediaEnabled,
-      maxToPublish: config.runtime.publishMaxPerRun,
-      ctaUrlOverride: accountCtaUrl,
-      promptThreadInterPartDelayMs: config.runtime.promptThreadInterPartDelayMs,
-      promptThreadReplyRetryDelayMs: config.runtime.promptThreadReplyRetryDelayMs,
-      accountKey: key,
-      treatBlankAccountKeyAsMatch: account.isDefault
-    });
+      const publishResult = await publishNowJob({
+        airtable,
+        postsTableName: config.airtable.postsTableName,
+        logger,
+        threads,
+        telegram,
+        timezone: config.runtime.timezone,
+        maxCharsPerPart: config.runtime.threadPartMaxChars,
+        autopublishEnabled: config.runtime.autopublishEnabled,
+        postMediaEnabled: config.runtime.postMediaEnabled,
+        maxToPublish: config.runtime.publishMaxPerRun,
+        ctaUrlOverride: accountCtaUrl,
+        promptThreadInterPartDelayMs: config.runtime.promptThreadInterPartDelayMs,
+        promptThreadReplyRetryDelayMs: config.runtime.promptThreadReplyRetryDelayMs,
+        accountKey: key,
+        treatBlankAccountKeyAsMatch: account.isDefault
+      });
 
-    await healthJob({
-      airtable,
-      postsTableName: config.airtable.postsTableName,
-      logger,
-      telegram,
-      timezone: config.runtime.timezone,
-      accountKey: key,
-      treatBlankAccountKeyAsMatch: account.isDefault
-    });
+      await healthJob({
+        airtable,
+        postsTableName: config.airtable.postsTableName,
+        logger,
+        telegram,
+        timezone: config.runtime.timezone,
+        accountKey: key,
+        treatBlankAccountKeyAsMatch: account.isDefault
+      });
 
-    perAccount[key] = {
-      ingest: {
-        newSeeds: ingestResult.newSeeds,
-        dedupedSeeds: ingestResult.dedupedSeeds,
-        processedDonors: ingestResult.processedDonors,
-        donorsCount: ingestResult.donorsCount,
-        errorsCount: ingestResult.errorsCount
-      },
-      publish: publishResult
-    };
+      perAccount[key] = {
+        ingest: {
+          newSeeds: ingestResult.newSeeds,
+          dedupedSeeds: ingestResult.dedupedSeeds,
+          processedDonors: ingestResult.processedDonors,
+          donorsCount: ingestResult.donorsCount,
+          errorsCount: ingestResult.errorsCount
+        },
+        publish: publishResult
+      };
 
-    totalNewSeeds += ingestResult.newSeeds;
-    totalDedupedSeeds += ingestResult.dedupedSeeds;
-    totalProcessedDonors += ingestResult.processedDonors;
-    totalDonorsCount += ingestResult.donorsCount;
-    totalErrorsCount += ingestResult.errorsCount;
-    totalAttempted += publishResult.attempted;
-    totalPublished += publishResult.published;
-    totalFailed += publishResult.failed;
-    totalCriticalAlerts += publishResult.criticalAlerts;
+      totalNewSeeds += ingestResult.newSeeds;
+      totalDedupedSeeds += ingestResult.dedupedSeeds;
+      totalProcessedDonors += ingestResult.processedDonors;
+      totalDonorsCount += ingestResult.donorsCount;
+      totalErrorsCount += ingestResult.errorsCount;
+      totalAttempted += publishResult.attempted;
+      totalPublished += publishResult.published;
+      totalFailed += publishResult.failed;
+      totalCriticalAlerts += publishResult.criticalAlerts;
+    } catch (error) {
+      perAccount[key] = { error: error instanceof Error ? error.message : String(error) };
+      await logger.log({
+        level: "ERROR",
+        subsystem: "HEALTH",
+        message: `Account run failed (${key})`,
+        error
+      });
+      // Keep other accounts running even if one fails.
+      continue;
+    }
   }
 
   await logger.log({ level: "INFO", subsystem: "HEALTH", message: "Once run finished" });

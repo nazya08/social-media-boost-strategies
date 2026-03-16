@@ -28,11 +28,35 @@ const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
 const countMatches = (text: string, re: RegExp) => (String(text ?? "").match(re) ?? []).length;
 
-const isLikelyUkrainian = (text: string) => {
-  const sample = String(text ?? "").slice(0, 5000);
+const stripUrls = (text: string) =>
+  String(text ?? "")
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/\bt\.me\/[A-Za-z0-9_]+\b/gi, "");
+
+const isLikelyUkrainianText = (text: string) => {
+  const sample = stripUrls(text).slice(0, 8000);
   const cyrillic = countMatches(sample, /[\u0400-\u04FF]/g);
   const latin = countMatches(sample, /[A-Za-z]/g);
-  return cyrillic >= Math.max(30, latin);
+  const total = cyrillic + latin;
+  if (total < 40) return cyrillic >= 10;
+  // Allow some Latin (brand names, code, URLs), but require Cyrillic dominance.
+  return cyrillic >= 40 && cyrillic / total >= 0.55;
+};
+
+const isLikelyUkrainianParts = (parts: string[]) => {
+  const content = parts.slice(0, -1); // ignore CTA
+  if (content.length === 0) return true;
+  if (!isLikelyUkrainianText(content.join("\n"))) return false;
+
+  for (const part of content) {
+    const sample = stripUrls(part);
+    const cyrillic = countMatches(sample, /[\u0400-\u04FF]/g);
+    const latin = countMatches(sample, /[A-Za-z]/g);
+    const total = cyrillic + latin;
+    if (total < 40) continue;
+    if (cyrillic < latin) return false;
+  }
+  return true;
 };
 
 export class AnthropicClient {
@@ -95,11 +119,11 @@ export class AnthropicClient {
             "IMPORTANT: Output must be Ukrainian. Translate ALL list items/prompts into Ukrainian. Do not output English sentences (brand names/URLs are ok)."
           ].join("\n");
 
-    const callAnthropic = async (systemText: string): Promise<GeneratedThread> => {
+    const callAnthropic = async (systemText: string, temperature = 0.5): Promise<GeneratedThread> => {
       const payload = {
         model: this.options.model,
         max_tokens: 2200,
-        temperature: 0.5,
+        temperature,
         system: systemText,
         tools: [submitThreadTool],
         tool_choice: { type: "tool", name: "submit_thread" },
@@ -179,14 +203,20 @@ export class AnthropicClient {
     }
 
     if (input.language === "UA") {
-      const withoutCta = sanitizedParts.slice(0, -1).join("\n");
-      if (!isLikelyUkrainian(withoutCta)) {
-        const strictSystem = [system, "", "STRICT MODE: Rewrite EVERYTHING into Ukrainian. Translate all list items/prompts into Ukrainian. Do not output English sentences."].join("\n");
-        parsed = await callAnthropic(strictSystem);
+      if (!isLikelyUkrainianParts(sanitizedParts)) {
+        const strictSystem = [
+          system,
+          "",
+          "STRICT MODE: Rewrite EVERYTHING into Ukrainian (Cyrillic). Translate all list items/prompts into Ukrainian. Do not output English sentences."
+        ].join("\n");
+        parsed = await callAnthropic(strictSystem, 0.2);
         sanitizedParts = parsed.parts.map((p: string) => clamp(String(p ?? ""), input.maxCharsPerPart).trim());
         const retryLast = sanitizedParts[sanitizedParts.length - 1] ?? "";
         if (!retryLast.includes(input.ctaUrl)) {
           sanitizedParts[sanitizedParts.length - 1] = expectedCta;
+        }
+        if (!isLikelyUkrainianParts(sanitizedParts)) {
+          throw new Error("UA generation failed: output is not Ukrainian (after retry).");
         }
       }
     }
