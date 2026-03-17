@@ -63,6 +63,7 @@ export const ingestJob = async (params: {
   ctaUrl: string;
   ctaTextEn: string;
   ctaTextUa: string;
+  skipMediaDefault?: boolean;
   accountKey?: string;
   treatBlankAccountKeyAsMatch?: boolean;
 }) => {
@@ -72,7 +73,20 @@ export const ingestJob = async (params: {
   let processedDonors = 0;
   let newSeeds = 0;
   let dedupedSeeds = 0;
+  let skippedMediaSeeds = 0;
   let errorsCount = 0;
+
+  const coerceBool = (value: unknown) => {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value !== 0;
+    if (typeof value === "string") {
+      const v = value.trim().toLowerCase();
+      if (!v) return undefined;
+      if (["1", "true", "yes", "y", "on"].includes(v)) return true;
+      if (["0", "false", "no", "n", "off"].includes(v)) return false;
+    }
+    return undefined;
+  };
 
   const donorsBaseFilter = `AND({${DonorFields.Status}}="Active", {${DonorFields.FeedUrl}}!="")`;
   const donorsAccountFilter =
@@ -103,6 +117,8 @@ export const ingestJob = async (params: {
       const items = feed.items ?? [];
       const donorLanguageRaw = String(donor.fields?.[DonorFields.Language] ?? "UA").trim().toUpperCase();
       const donorLanguage = donorLanguageRaw === "EN" ? "EN" : "UA";
+      const donorSkipMedia = coerceBool(donor.fields?.[DonorFields.SkipMedia]);
+      const skipMedia = donorSkipMedia ?? params.skipMediaDefault ?? false;
 
       const parseItemDate = (it: any) => {
         const iso = String(it?.isoDate ?? it?.pubDate ?? "").trim();
@@ -125,6 +141,11 @@ export const ingestJob = async (params: {
         const publishedAt = String((item as any).isoDate ?? (item as any).pubDate ?? "").trim();
         const rawMedia = extractMediaFromItem(item);
         const media = rawMedia?.url && isHttpUrl(rawMedia.url) ? rawMedia : undefined;
+
+        if (skipMedia && media?.url) {
+          skippedMediaSeeds += 1;
+          continue;
+        }
 
         const hashInput = normalizeForHash([title, link, seedText].filter(Boolean).join(" | "));
         const seedHash = sha256Hex(hashInput);
@@ -214,9 +235,9 @@ export const ingestJob = async (params: {
     message:
       donorsCount === 0
         ? `Ingest: no active donors with Feed URL (table: ${params.donorsTableName})`
-        : `Ingest: donors=${donorsCount}, processed=${processedDonors}, new_seeds=${newSeeds}, deduped=${dedupedSeeds}, errors=${errorsCount}`,
-    meta: { donorsCount, processedDonors, newSeeds, dedupedSeeds, errorsCount }
+        : `Ingest: donors=${donorsCount}, processed=${processedDonors}, new_seeds=${newSeeds}, deduped=${dedupedSeeds}, skipped_media=${skippedMediaSeeds}, errors=${errorsCount}`,
+    meta: { donorsCount, processedDonors, newSeeds, dedupedSeeds, skippedMediaSeeds, errorsCount }
   });
 
-  return { createdPostRecordIds, newSeeds, dedupedSeeds, donorsCount, processedDonors, errorsCount };
+  return { createdPostRecordIds, newSeeds, dedupedSeeds, skippedMediaSeeds, donorsCount, processedDonors, errorsCount };
 };

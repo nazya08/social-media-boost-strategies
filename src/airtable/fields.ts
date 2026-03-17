@@ -43,6 +43,7 @@ export const DonorFields = {
   Status: "Status",
   Language: "Language",
   AccountKey: "Account Key",
+  SkipMedia: "Skip Media",
   LastFetchedAt: "Last Fetched At",
   Notes: "Notes"
 } as const;

@@ -61,6 +61,7 @@ Vercel Hobby дозволяє лише daily cron jobs. Тому схема та
 
 - Airtable:
   - `Threads Donors` має поле `Account Key` (порожнє або `DEFAULT` для дефолтного акаунта).
+  - Опційно: поле `Skip Media` (checkbox). Якщо увімкнено — ingest буде **пропускати** елементи фіду з картинками/відео (enclosure/media:content/<img>).
   - `Posts` має поле `Account Key` (заповнюється на ingest).
   - Щоб один і той самий Feed URL постився в різні акаунти/мови — створи окремі donor records з різними `Account Key` і `Language`.
 - Env:

@@ -14,7 +14,14 @@ import { loadThreadsAccounts } from "./accounts.js";
 
 export type RunOnceSummary = {
   skipped?: { reason: string };
-  ingest?: { newSeeds: number; dedupedSeeds: number; processedDonors: number; donorsCount: number; errorsCount: number };
+  ingest?: {
+    newSeeds: number;
+    dedupedSeeds: number;
+    skippedMediaSeeds: number;
+    processedDonors: number;
+    donorsCount: number;
+    errorsCount: number;
+  };
   generate?: { processed: number; generated: number; failed: number };
   publish?: { attempted: number; published: number; failed: number; criticalAlerts: number };
   accounts?: Record<string, unknown>;
@@ -78,6 +85,7 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
   // Aggregate summary (kept for backward compatibility)
   let totalNewSeeds = 0;
   let totalDedupedSeeds = 0;
+  let totalSkippedMediaSeeds = 0;
   let totalProcessedDonors = 0;
   let totalDonorsCount = 0;
   let totalErrorsCount = 0;
@@ -91,6 +99,10 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
 
     try {
       const accountCtaUrl = String(process.env[`CTA_URL_${key}`] ?? "").trim() || config.runtime.ctaUrl;
+      const accountSkipMedia =
+        String(process.env[`INGEST_SKIP_MEDIA_${key}`] ?? "").trim() !== ""
+          ? ["1", "true", "yes", "y", "on"].includes(String(process.env[`INGEST_SKIP_MEDIA_${key}`] ?? "").trim().toLowerCase())
+          : ["1", "true", "yes", "y", "on"].includes(String(process.env.INGEST_SKIP_MEDIA ?? "").trim().toLowerCase());
 
       const threads = new ThreadsClient(account.threads);
 
@@ -104,6 +116,7 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
         ctaUrl: accountCtaUrl,
         ctaTextEn: config.runtime.ctaTextEn,
         ctaTextUa: config.runtime.ctaTextUa,
+        skipMediaDefault: accountSkipMedia,
         accountKey: key,
         treatBlankAccountKeyAsMatch: account.isDefault
       });
@@ -158,6 +171,7 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
         ingest: {
           newSeeds: ingestResult.newSeeds,
           dedupedSeeds: ingestResult.dedupedSeeds,
+          skippedMediaSeeds: ingestResult.skippedMediaSeeds,
           processedDonors: ingestResult.processedDonors,
           donorsCount: ingestResult.donorsCount,
           errorsCount: ingestResult.errorsCount
@@ -167,6 +181,7 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
 
       totalNewSeeds += ingestResult.newSeeds;
       totalDedupedSeeds += ingestResult.dedupedSeeds;
+      totalSkippedMediaSeeds += ingestResult.skippedMediaSeeds;
       totalProcessedDonors += ingestResult.processedDonors;
       totalDonorsCount += ingestResult.donorsCount;
       totalErrorsCount += ingestResult.errorsCount;
@@ -193,6 +208,7 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
     ingest: {
       newSeeds: totalNewSeeds,
       dedupedSeeds: totalDedupedSeeds,
+      skippedMediaSeeds: totalSkippedMediaSeeds,
       processedDonors: totalProcessedDonors,
       donorsCount: totalDonorsCount,
       errorsCount: totalErrorsCount
