@@ -4,6 +4,7 @@ on:
   schedule:
     - cron: "0 */2 * * *"   # DEFAULT account
     - cron: "30 */2 * * *"  # AI_BUILDERS_LAB account
+    - cron: "15 */2 * * *"  # AI_SOLUTIONSHUB account
   workflow_dispatch: {}
 
 jobs:
@@ -22,9 +23,10 @@ jobs:
           fi
 
           ACCOUNTS="DEFAULT"
-          if [ "${{ github.event.schedule }}" = "30 */2 * * *" ]; then
-            ACCOUNTS="AI_BUILDERS_LAB"
-          fi
+          case "${{ github.event.schedule }}" in
+            "30 */2 * * *") ACCOUNTS="AI_BUILDERS_LAB" ;;
+            "15 */2 * * *") ACCOUNTS="AI_SOLUTIONSHUB" ;;
+          esac
 
           URL="$CRON_URL"
           SEP="?"

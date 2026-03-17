@@ -1,6 +1,6 @@
 # Threads Auto-Poster — Airtable + Threads API + Anthropic + Telegram Alerts
 
-Сервіс **тільки для Threads-постингу (1 акаунт)**:
+Сервіс **для Threads-постингу (multi-account підтримується)**:
 - бере “сіди” з RSS/Atom фідів у Airtable (`Threads Donors`)
 - генерує треди (EN/UA) через Anthropic (`claude-sonnet-4-6`)
 - постить у Threads через **офіційний Threads API**
@@ -50,12 +50,23 @@
 
 Vercel Hobby дозволяє лише daily cron jobs. Тому схема така:
 - деплоїмо на Vercel endpoint `GET /api/cron`
-- запускаємо **GitHub Actions schedule** (`.github/workflows/cron.yml`), який кожні 2 години викликає `/api/cron`
+- запускаємо **GitHub Actions schedule** (`.github/workflows/cron.yml`), який по розкладу викликає `/api/cron?accounts=...`
 - захищаємо endpoint секретом `CRON_SECRET` (GitHub Actions відправляє header `x-cron-secret`)
 
 ### Env на Vercel
 
 У Vercel → Project → Settings → Environment Variables додай значення з `.env.example` (без коміту секретів).
+
+## Multi-account
+
+- Airtable:
+  - `Threads Donors` має поле `Account Key` (порожнє або `DEFAULT` для дефолтного акаунта).
+  - `Posts` має поле `Account Key` (заповнюється на ingest).
+  - Щоб один і той самий Feed URL постився в різні акаунти/мови — створи окремі donor records з різними `Account Key` і `Language`.
+- Env:
+  - Додай ключ у `THREADS_ADDITIONAL_ACCOUNTS` (CSV).
+  - Додай `THREADS_ACCESS_TOKEN_<KEY>` і `THREADS_USER_ID_<KEY>` (і опційно `THREADS_DEVICE_ID_<KEY>`).
+  - Для різного CTA по акаунтах використовуй `CTA_URL_<KEY>`.
 
 ## Тюнінг параметрів (важливе)
 
