@@ -122,22 +122,44 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
       });
 
       const recordIds = ingestResult.createdPostRecordIds;
-      await generateJob({
-        airtable,
-        postsTableName: config.airtable.postsTableName,
-        logger,
-        anthropic,
-        maxCharsPerPart: config.runtime.threadPartMaxChars,
-        partsTargetMin: config.runtime.partsTargetMin,
-        partsTargetMax: config.runtime.partsTargetMax,
-        maxRecords: config.runtime.generateMaxRecords,
-        ...(recordIds.length > 0 ? { recordIds } : {}),
-        ctaUrlOverride: accountCtaUrl,
-        ctaTextEnOverride: config.runtime.ctaTextEn,
-        ctaTextUaOverride: config.runtime.ctaTextUa,
-        accountKey: key,
-        treatBlankAccountKeyAsMatch: account.isDefault
-      });
+      // Generate newly ingested posts first, then use remaining capacity for backlog (Seeded/Failed without parts).
+      if (recordIds.length > 0) {
+        await generateJob({
+          airtable,
+          postsTableName: config.airtable.postsTableName,
+          logger,
+          anthropic,
+          maxCharsPerPart: config.runtime.threadPartMaxChars,
+          partsTargetMin: config.runtime.partsTargetMin,
+          partsTargetMax: config.runtime.partsTargetMax,
+          maxRecords: Math.max(1, Math.min(recordIds.length, config.runtime.generateMaxRecords)),
+          recordIds,
+          ctaUrlOverride: accountCtaUrl,
+          ctaTextEnOverride: config.runtime.ctaTextEn,
+          ctaTextUaOverride: config.runtime.ctaTextUa,
+          accountKey: key,
+          treatBlankAccountKeyAsMatch: account.isDefault
+        });
+      }
+
+      const remainingGenerate = Math.max(0, config.runtime.generateMaxRecords - recordIds.length);
+      if (remainingGenerate > 0) {
+        await generateJob({
+          airtable,
+          postsTableName: config.airtable.postsTableName,
+          logger,
+          anthropic,
+          maxCharsPerPart: config.runtime.threadPartMaxChars,
+          partsTargetMin: config.runtime.partsTargetMin,
+          partsTargetMax: config.runtime.partsTargetMax,
+          maxRecords: remainingGenerate,
+          ctaUrlOverride: accountCtaUrl,
+          ctaTextEnOverride: config.runtime.ctaTextEn,
+          ctaTextUaOverride: config.runtime.ctaTextUa,
+          accountKey: key,
+          treatBlankAccountKeyAsMatch: account.isDefault
+        });
+      }
 
       const publishResult = await publishNowJob({
         airtable,
