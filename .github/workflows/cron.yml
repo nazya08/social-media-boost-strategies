@@ -3,7 +3,7 @@ name: Trigger Vercel Cron
 on:
   schedule:
     - cron: "0 */2 * * *"   # DEFAULT account
-    - cron: "30 */3 * * *"  # AI_BUILDERS_LAB account
+    - cron: "30 */2 * * *"  # AI_BUILDERS_LAB account
   workflow_dispatch: {}
 
 jobs:
@@ -22,7 +22,7 @@ jobs:
           fi
 
           ACCOUNTS="DEFAULT"
-          if [ "${{ github.event.schedule }}" = "30 */3 * * *" ]; then
+          if [ "${{ github.event.schedule }}" = "30 */2 * * *" ]; then
             ACCOUNTS="AI_BUILDERS_LAB"
           fi
 
