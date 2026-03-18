@@ -119,6 +119,14 @@ const parseItemDate = (it) => {
   return dt && !Number.isNaN(dt.getTime()) ? dt.getTime() : 0;
 };
 
+const firstHttpUrl = (...candidates) => {
+  for (const c of candidates) {
+    const v = String(c ?? "").trim();
+    if (v && isHttpUrl(v)) return v;
+  }
+  return "";
+};
+
 const coerceBool = (value) => {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
@@ -171,7 +179,7 @@ const main = async () => {
       if (created.length >= count) break;
 
       const title = String(item?.title ?? "").trim() || "Seed";
-      const link = String(item?.link ?? "").trim();
+      const link = firstHttpUrl(item?.link, item?.guid, item?.id, item?.linkUrl);
       const seedText = String(item?.contentSnippet ?? "").trim() || String(item?.content ?? "").trim() || title;
       const publishedAt = String(item?.isoDate ?? item?.pubDate ?? "").trim();
 
@@ -179,21 +187,29 @@ const main = async () => {
       const media = rawMedia?.url && isHttpUrl(rawMedia.url) ? rawMedia : undefined;
       if (skipMedia && media?.url) continue;
 
-      if (!link) continue; // prefer stable dedup key
-
       const existsFilter = `AND({Seed URL}=\"${escapeAirtableString(link)}\", {Account Key}=\"${escapeAirtableString(
         accountKey
       )}\")`;
-      const existing = await listAll(postsTableName, { filterByFormula: existsFilter, maxRecords: 1 });
-      if (existing.length > 0) continue;
+      if (link) {
+        const existing = await listAll(postsTableName, { filterByFormula: existsFilter, maxRecords: 1 });
+        if (existing.length > 0) continue;
+      }
 
       const hashInput = normalizeForHash([title, link, seedText].filter(Boolean).join(" | "));
       const seedHash = sha256Hex(hashInput);
 
+      if (!link) {
+        const hashExistsFilter = `AND({Seed Hash}=\"${escapeAirtableString(seedHash)}\", {Account Key}=\"${escapeAirtableString(
+          accountKey
+        )}\")`;
+        const existingByHash = await listAll(postsTableName, { filterByFormula: hashExistsFilter, maxRecords: 1 });
+        if (existingByHash.length > 0) continue;
+      }
+
       const fields = {
         Title: title,
         "Seed Text": seedText,
-        "Seed URL": link,
+        ...(link ? { "Seed URL": link } : {}),
         "Seed Published At": publishedAt || undefined,
         "Seed Author": username || undefined,
         "Seed Hash": seedHash,
@@ -209,7 +225,7 @@ const main = async () => {
       };
 
       const rec = await createRecord(postsTableName, fields);
-      created.push({ id: rec?.id, url: link });
+      created.push({ id: rec?.id, url: link || undefined });
     }
   }
 
@@ -225,4 +241,3 @@ main().catch((err) => {
   console.error(err instanceof Error ? err.message : String(err));
   process.exitCode = 1;
 });
-
