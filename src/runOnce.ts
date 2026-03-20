@@ -117,6 +117,7 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
         ctaTextEn: config.runtime.ctaTextEn,
         ctaTextUa: config.runtime.ctaTextUa,
         skipMediaDefault: accountSkipMedia,
+        autoDisableOn402: config.runtime.ingestAutoDisableOn402,
         accountKey: key,
         treatBlankAccountKeyAsMatch: account.isDefault
       });

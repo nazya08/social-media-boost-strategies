@@ -64,10 +64,16 @@ export const ingestJob = async (params: {
   ctaTextEn: string;
   ctaTextUa: string;
   skipMediaDefault?: boolean;
+  autoDisableOn402?: boolean;
   accountKey?: string;
   treatBlankAccountKeyAsMatch?: boolean;
 }) => {
-  const parser = new Parser();
+  const parser = new Parser({
+    headers: {
+      // Some RSS providers block "unknown" clients; a stable UA reduces accidental blocks.
+      "User-Agent": "ThreadsAutoposter/1.0 (+rss-parser)"
+    }
+  });
   const createdPostRecordIds: string[] = [];
   let donorsCount = 0;
   let processedDonors = 0;
@@ -219,12 +225,31 @@ export const ingestJob = async (params: {
       } as any);
     } catch (error) {
       errorsCount += 1;
+
+      const statusCode = (error as any)?.statusCode;
+      const is402 =
+        statusCode === 402 || (error instanceof Error && /status code\s*402/i.test(String(error.message ?? "")));
+      if (is402 && params.autoDisableOn402) {
+        try {
+          const nowIso = new Date().toISOString();
+          const existingNotes = String(donor.fields?.[DonorFields.Notes] ?? "").trim();
+          const noteLine = `[AUTO] Disabled donor due to RSS 402 (Payment Required) at ${nowIso}`;
+          const notes = existingNotes ? `${existingNotes}\n${noteLine}` : noteLine;
+          await params.airtable.updateRecord(params.donorsTableName, donor.id, {
+            [DonorFields.Status]: "Inactive",
+            [DonorFields.Notes]: notes
+          } as any);
+        } catch {
+          // ignore donor status update failures
+        }
+      }
+
       await params.logger.log({
         level: "ERROR",
         subsystem: "INGEST",
         message: `Ingest failed for donor ${username}`,
         error,
-        meta: { feedUrl }
+        meta: { feedUrl, statusCode, autoDisabled: Boolean(is402 && params.autoDisableOn402) }
       });
     }
   }
