@@ -132,7 +132,11 @@ export class AnthropicClient {
             "IMPORTANT: Output must be Ukrainian. Translate ALL list items/prompts into Ukrainian. Do not output English sentences (brand names/URLs are ok)."
           ].join("\n");
 
-    const callAnthropic = async (systemText: string, temperature = 0.5): Promise<GeneratedThread> => {
+    const callAnthropic = async (
+      systemText: string,
+      userText: string,
+      temperature = 0.5
+    ): Promise<GeneratedThread> => {
       const payload = {
         model: this.options.model,
         max_tokens: 2200,
@@ -146,7 +150,7 @@ export class AnthropicClient {
             content: [
               {
                 type: "text",
-                text: `${userSeed}\n\nUse the tool \`submit_thread\` to return the result. parts: root first, CTA last.`
+                text: userText
               }
             ]
           }
@@ -207,7 +211,8 @@ export class AnthropicClient {
       }
     } as const;
 
-    let parsed = await callAnthropic(system);
+    const seedUserText = `${userSeed}\n\nUse the tool \`submit_thread\` to return the result. parts: root first, CTA last.`;
+    let parsed = await callAnthropic(system, seedUserText);
     let sanitizedParts = parsed.parts.map((p: string) => clamp(String(p ?? ""), input.maxCharsPerPart).trim());
     const expectedCta = `${input.ctaText} ${input.ctaUrl}`.trim();
     const last = sanitizedParts[sanitizedParts.length - 1] ?? "";
@@ -222,14 +227,43 @@ export class AnthropicClient {
           "",
           "STRICT MODE: Rewrite EVERYTHING into Ukrainian (Cyrillic). Translate all list items/prompts into Ukrainian. Do not output English sentences."
         ].join("\n");
-        parsed = await callAnthropic(strictSystem, 0.2);
+        parsed = await callAnthropic(strictSystem, seedUserText, 0.2);
         sanitizedParts = parsed.parts.map((p: string) => clamp(String(p ?? ""), input.maxCharsPerPart).trim());
         const retryLast = sanitizedParts[sanitizedParts.length - 1] ?? "";
         if (!retryLast.includes(input.ctaUrl)) {
           sanitizedParts[sanitizedParts.length - 1] = expectedCta;
         }
         if (!isLikelyUkrainianParts(sanitizedParts)) {
-          throw new Error("UA generation failed: output is not Ukrainian (after retry).");
+          const draft = sanitizedParts
+            .map((p, i) => `PART ${i + 1}:\n${p}`)
+            .join("\n\n");
+          const translateSystem = [
+            system,
+            "",
+            "EMERGENCY TRANSLATION MODE: You will be given a DRAFT thread that may be partially/fully English.",
+            "Rewrite it into Ukrainian. Keep the same number of parts and the same structure (lists, numbering, bullets).",
+            `Hard constraint: each part <= ${input.maxCharsPerPart} characters.`,
+            `Last part MUST be exactly: "${expectedCta}".`,
+            "Do not add new ideas, do not expand. Just rewrite/translate to Ukrainian and make it sound natural."
+          ].join("\n");
+
+          const translateUserText = [
+            "DRAFT THREAD (rewrite into Ukrainian):",
+            draft,
+            "",
+            "Use the tool `submit_thread` to return the result. parts: root first, CTA last."
+          ].join("\n\n");
+
+          parsed = await callAnthropic(translateSystem, translateUserText, 0.2);
+          sanitizedParts = parsed.parts.map((p: string) => clamp(String(p ?? ""), input.maxCharsPerPart).trim());
+          const retry2Last = sanitizedParts[sanitizedParts.length - 1] ?? "";
+          if (!retry2Last.includes(input.ctaUrl)) {
+            sanitizedParts[sanitizedParts.length - 1] = expectedCta;
+          }
+
+          if (!isLikelyUkrainianParts(sanitizedParts)) {
+            throw new Error("UA generation failed: output is not Ukrainian (after retry).");
+          }
         }
       }
     }
