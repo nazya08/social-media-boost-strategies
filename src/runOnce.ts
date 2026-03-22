@@ -1,6 +1,5 @@
 import { DateTime } from "luxon";
 import { loadConfig } from "./config.js";
-import { AirtableClient } from "./airtable/airtableClient.js";
 import { Logger } from "./logger.js";
 import { AnthropicClient } from "./services/anthropic.js";
 import { TelegramClient } from "./services/telegram.js";
@@ -9,8 +8,11 @@ import { ingestJob } from "./jobs/ingest.js";
 import { generateJob } from "./jobs/generate.js";
 import { publishNowJob } from "./jobs/publishNow.js";
 import { healthJob } from "./jobs/health.js";
-import { runLogsCleanupJob } from "./jobs/runLogsCleanup.js";
 import { loadThreadsAccounts } from "./accounts.js";
+import { AirtableClient } from "./airtable/airtableClient.js";
+import { AirtableStore } from "./store/airtableStore.js";
+import { SupabaseStore } from "./store/supabaseStore.js";
+import { DataStore } from "./store/store.js";
 
 export type RunOnceSummary = {
   skipped?: { reason: string };
@@ -37,27 +39,36 @@ const isWithinWindow = (timezone: string, startHour: number, endHour: number) =>
 export const runOnce = async (): Promise<RunOnceSummary> => {
   const config = loadConfig();
 
-  const airtable = new AirtableClient({ apiKey: config.airtable.apiKey, baseId: config.airtable.baseId });
-
-  // Prevent Airtable Free plan Run Logs from hitting the 1000-record cap.
-  try {
-    await runLogsCleanupJob({
-      airtable,
-      runLogsTableName: config.airtable.runLogsTableName,
-      thresholdRecords: config.runtime.runLogsCleanupThresholdRecords,
-      trimToRecords: config.runtime.runLogsCleanupTrimToRecords
+  let store: DataStore;
+  if (config.dataStore.kind === "airtable") {
+    const airtable = new AirtableClient({ apiKey: config.airtable!.apiKey, baseId: config.airtable!.baseId });
+    store = new AirtableStore(airtable, {
+      posts: config.airtable!.postsTableName,
+      donors: config.airtable!.donorsTableName,
+      runLogs: config.airtable!.runLogsTableName
     });
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error("[RUN_LOGS] Cleanup failed:", err);
+  } else {
+    store = new SupabaseStore(config);
+  }
+
+  // Best-effort cleanup for persisted run logs (if supported by the store).
+  if (config.runtime.runLogsAirtableEnabled && store.cleanupRunLogs) {
+    try {
+      await store.cleanupRunLogs({
+        thresholdRecords: config.runtime.runLogsCleanupThresholdRecords,
+        trimToRecords: config.runtime.runLogsCleanupTrimToRecords
+      });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[RUN_LOGS] Cleanup failed:", err);
+    }
   }
 
   const logger = new Logger({
-    airtable,
-    runLogsTableName: config.airtable.runLogsTableName,
     timezone: config.runtime.timezone,
-    airtableEnabled: config.runtime.runLogsAirtableEnabled,
-    airtableMinLevel: config.logging.runLogsMinLevel
+    runLogsEnabled: config.runtime.runLogsAirtableEnabled,
+    runLogsMinLevel: config.logging.runLogsMinLevel,
+    runLogWriter: store.createRunLog ? (log) => store.createRunLog!(log) : undefined
   });
 
   const anthropic = new AnthropicClient({ apiKey: config.anthropic.apiKey, model: config.anthropic.model });
@@ -107,9 +118,7 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
       const threads = new ThreadsClient(account.threads);
 
       const ingestResult = await ingestJob({
-        airtable,
-        donorsTableName: config.airtable.donorsTableName,
-        postsTableName: config.airtable.postsTableName,
+        store,
         logger,
         timezone: config.runtime.timezone,
         maxItemsPerDonor: config.runtime.ingestMaxItemsPerDonor,
@@ -126,8 +135,7 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
       // Generate newly ingested posts first, then use remaining capacity for backlog (Seeded/Failed without parts).
       if (recordIds.length > 0) {
         await generateJob({
-          airtable,
-          postsTableName: config.airtable.postsTableName,
+          store,
           logger,
           anthropic,
           maxCharsPerPart: config.runtime.threadPartMaxChars,
@@ -146,8 +154,7 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
       const remainingGenerate = Math.max(0, config.runtime.generateMaxRecords - recordIds.length);
       if (remainingGenerate > 0) {
         await generateJob({
-          airtable,
-          postsTableName: config.airtable.postsTableName,
+          store,
           logger,
           anthropic,
           maxCharsPerPart: config.runtime.threadPartMaxChars,
@@ -163,8 +170,7 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
       }
 
       const publishResult = await publishNowJob({
-        airtable,
-        postsTableName: config.airtable.postsTableName,
+        store,
         logger,
         threads,
         telegram,
@@ -181,8 +187,7 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
       });
 
       await healthJob({
-        airtable,
-        postsTableName: config.airtable.postsTableName,
+        store,
         logger,
         telegram,
         timezone: config.runtime.timezone,

@@ -140,10 +140,35 @@ const coerceBool = (value) => {
 };
 
 const main = async () => {
-  const accountKeyRaw = process.argv[2] ?? "AI_SOLUTIONSHUB";
+  const args = process.argv.slice(2);
+  const accountKeyRaw = args[0] ?? "AI_SOLUTIONSHUB";
   const accountKey = String(accountKeyRaw).trim().toUpperCase();
-  const targetCount = Number.parseInt(process.argv[3] ?? "3", 10);
-  const count = Number.isFinite(targetCount) && targetCount > 0 ? targetCount : 3;
+
+  const findFlagValue = (flag) => {
+    const i = args.indexOf(flag);
+    if (i === -1) return undefined;
+    return args[i + 1];
+  };
+  const hasFlag = (flag) => args.includes(flag);
+
+  const defaultKey = String(process.env.THREADS_DEFAULT_ACCOUNT_KEY ?? "DEFAULT").trim().toUpperCase() || "DEFAULT";
+  const treatBlankAsMatch = accountKey === defaultKey;
+
+  const perDonorRaw = findFlagValue("--per-donor");
+  const perDonorCount = perDonorRaw ? Number.parseInt(String(perDonorRaw), 10) : undefined;
+  const perDonor =
+    Number.isFinite(perDonorCount) && perDonorCount && perDonorCount > 0 ? Math.min(perDonorCount, 20) : undefined;
+
+  const allowDuplicates = hasFlag("--allow-duplicates");
+
+  const maxTotalRaw = findFlagValue("--max-total");
+  const maxTotalParsed = maxTotalRaw ? Number.parseInt(String(maxTotalRaw), 10) : undefined;
+  const maxTotal =
+    Number.isFinite(maxTotalParsed) && maxTotalParsed && maxTotalParsed > 0 ? Math.min(maxTotalParsed, 200) : 60;
+
+  // Backward compatible positional argument: total count (default 3)
+  const targetCount = Number.parseInt(args[1] ?? "3", 10);
+  const count = Number.isFinite(targetCount) && targetCount > 0 ? Math.min(targetCount, 200) : 3;
 
   const ctaUrl =
     String(process.env[`CTA_URL_${accountKey}`] ?? "").trim() ||
@@ -151,7 +176,10 @@ const main = async () => {
   const ctaTextUa = String(process.env.CTA_TEXT_UA ?? "Більше про AI та автоматизацію тут:").trim();
   const ctaTextEn = String(process.env.CTA_TEXT_EN ?? "More about AI & automation here:").trim();
 
-  const donorFilter = `AND({Status}=\"Active\", {Feed URL}!=\"\", {Account Key}=\"${escapeAirtableString(accountKey)}\")`;
+  const donorAccountFilter = treatBlankAsMatch
+    ? `OR({Account Key}="", {Account Key}="${escapeAirtableString(accountKey)}")`
+    : `{Account Key}="${escapeAirtableString(accountKey)}"`;
+  const donorFilter = `AND({Status}=\"Active\", {Feed URL}!=\"\", ${donorAccountFilter})`;
   const donors = await listAll(donorsTableName, { filterByFormula: donorFilter, maxRecords: 50 });
   if (donors.length === 0) {
     throw new Error(`No active donors found for Account Key=${accountKey} in table "${donorsTableName}".`);
@@ -161,7 +189,7 @@ const main = async () => {
   const created = [];
 
   for (const donor of donors) {
-    if (created.length >= count) break;
+    if (created.length >= (perDonor ? maxTotal : count)) break;
 
     const donorId = donor.id;
     const feedUrl = String(donor?.fields?.["Feed URL"] ?? "").trim();
@@ -175,8 +203,14 @@ const main = async () => {
     const feed = await parser.parseURL(feedUrl);
     const items = (feed.items ?? []).slice().sort((a, b) => parseItemDate(b) - parseItemDate(a));
 
+    let donorCreated = 0;
     for (const item of items) {
-      if (created.length >= count) break;
+      if (perDonor) {
+        if (created.length >= maxTotal) break;
+        if (donorCreated >= perDonor) break;
+      } else {
+        if (created.length >= count) break;
+      }
 
       const title = String(item?.title ?? "").trim() || "Seed";
       const link = firstHttpUrl(item?.link, item?.guid, item?.id, item?.linkUrl);
@@ -187,23 +221,23 @@ const main = async () => {
       const media = rawMedia?.url && isHttpUrl(rawMedia.url) ? rawMedia : undefined;
       if (skipMedia && media?.url) continue;
 
-      const existsFilter = `AND({Seed URL}=\"${escapeAirtableString(link)}\", {Account Key}=\"${escapeAirtableString(
-        accountKey
-      )}\")`;
-      if (link) {
-        const existing = await listAll(postsTableName, { filterByFormula: existsFilter, maxRecords: 1 });
-        if (existing.length > 0) continue;
-      }
-
       const hashInput = normalizeForHash([title, link, seedText].filter(Boolean).join(" | "));
       const seedHash = sha256Hex(hashInput);
 
-      if (!link) {
-        const hashExistsFilter = `AND({Seed Hash}=\"${escapeAirtableString(seedHash)}\", {Account Key}=\"${escapeAirtableString(
-          accountKey
-        )}\")`;
-        const existingByHash = await listAll(postsTableName, { filterByFormula: hashExistsFilter, maxRecords: 1 });
-        if (existingByHash.length > 0) continue;
+      if (!allowDuplicates) {
+        const postsAccountFilter = treatBlankAsMatch
+          ? `OR({Account Key}="", {Account Key}="${escapeAirtableString(accountKey)}")`
+          : `{Account Key}="${escapeAirtableString(accountKey)}"`;
+
+        if (link) {
+          const existsFilter = `AND({Seed URL}=\"${escapeAirtableString(link)}\", ${postsAccountFilter})`;
+          const existing = await listAll(postsTableName, { filterByFormula: existsFilter, maxRecords: 1 });
+          if (existing.length > 0) continue;
+        } else {
+          const hashExistsFilter = `AND({Seed Hash}=\"${escapeAirtableString(seedHash)}\", ${postsAccountFilter})`;
+          const existingByHash = await listAll(postsTableName, { filterByFormula: hashExistsFilter, maxRecords: 1 });
+          if (existingByHash.length > 0) continue;
+        }
       }
 
       const fields = {
@@ -226,13 +260,27 @@ const main = async () => {
 
       const rec = await createRecord(postsTableName, fields);
       created.push({ id: rec?.id, url: link || undefined });
+      donorCreated += 1;
     }
   }
 
-  console.log(JSON.stringify({ ok: true, accountKey, createdCount: created.length, created }, null, 2));
-  if (created.length < count) {
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        accountKey,
+        createdCount: created.length,
+        mode: perDonor ? { perDonor, maxTotal, allowDuplicates } : { total: count, allowDuplicates },
+        created
+      },
+      null,
+      2
+    )
+  );
+  const target = perDonor ? maxTotal : count;
+  if (created.length < target) {
     console.log(
-      `Note: created ${created.length}/${count}. Donor feed may not have more unseen items (or they lack link URLs).`
+      `Note: created ${created.length}/${target}. Donor feed may not have more items (or they were skipped by media filter).`
     );
   }
 };

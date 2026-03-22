@@ -1,16 +1,14 @@
 import { DateTime } from "luxon";
-import { AirtableClient } from "./airtable/airtableClient.js";
-import { RunLogFields } from "./airtable/fields.js";
+import { RunLog } from "./store/store.js";
 
 export type LogLevel = "INFO" | "WARN" | "ERROR" | "CRITICAL";
 export type Subsystem = "INGEST" | "GENERATE" | "SCHEDULE" | "PUBLISH" | "HEALTH";
 
 export type LoggerOptions = {
-  airtable: AirtableClient;
-  runLogsTableName: string;
   timezone: string;
-  airtableEnabled?: boolean;
-  airtableMinLevel?: LogLevel;
+  runLogsEnabled?: boolean;
+  runLogsMinLevel?: LogLevel;
+  runLogWriter?: (log: RunLog) => Promise<void>;
 };
 
 export class Logger {
@@ -51,26 +49,26 @@ export class Logger {
       console.log(line);
     }
 
-    // Best-effort Airtable run log (never throws)
-    const airtableEnabled = this.options.airtableEnabled ?? true;
-    if (!airtableEnabled) return;
+    // Best-effort persisted run log (never throws)
+    const runLogsEnabled = this.options.runLogsEnabled ?? false;
+    if (!runLogsEnabled || !this.options.runLogWriter) return;
 
-    const minLevel = this.options.airtableMinLevel ?? "WARN";
+    const minLevel = this.options.runLogsMinLevel ?? "WARN";
     if (this.levelPriority(params.level) < this.levelPriority(minLevel)) return;
 
     try {
-      await this.options.airtable.createRecord(this.options.runLogsTableName, {
-        [RunLogFields.Timestamp]: timestamp,
-        [RunLogFields.Level]: params.level,
-        [RunLogFields.Subsystem]: params.subsystem,
-        ...(params.postRecordId ? { [RunLogFields.Post]: [params.postRecordId] } : {}),
-        [RunLogFields.Message]: params.message,
-        ...(errorStack ? { [RunLogFields.ErrorStack]: errorStack } : {}),
-        ...(params.meta !== undefined ? { [RunLogFields.MetaJson]: JSON.stringify(params.meta, null, 2) } : {})
-      } as Record<string, unknown>);
+      await this.options.runLogWriter({
+        timestampIso: timestamp ?? new Date().toISOString(),
+        level: params.level,
+        subsystem: params.subsystem,
+        message: params.message,
+        ...(params.postRecordId ? { postId: params.postRecordId } : {}),
+        ...(errorStack ? { errorStack } : {}),
+        ...(params.meta !== undefined ? { metaJson: JSON.stringify(params.meta, null, 2) } : {})
+      });
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error("[LOGGER] Failed to write Run Logs to Airtable:", err);
+      console.error("[LOGGER] Failed to write Run Logs:", err);
     }
   }
 }

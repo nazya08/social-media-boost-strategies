@@ -1,15 +1,10 @@
 import { DateTime } from "luxon";
-import { AirtableClient } from "../airtable/airtableClient.js";
-import { PostFields } from "../airtable/fields.js";
 import { Logger } from "../logger.js";
+import { DataStore } from "../store/store.js";
 import { TelegramClient } from "../services/telegram.js";
-import { accountKeyFilterFormula } from "../utils/airtableFormula.js";
-
-type Post = Record<string, unknown>;
 
 export const healthJob = async (params: {
-  airtable: AirtableClient;
-  postsTableName: string;
+  store: DataStore;
   logger: Logger;
   telegram?: TelegramClient;
   timezone: string;
@@ -18,49 +13,28 @@ export const healthJob = async (params: {
 }) => {
   const now = DateTime.now().setZone(params.timezone);
 
-  const accountFilter =
-    params.accountKey && params.accountKey.trim()
-      ? accountKeyFilterFormula({
-          fieldName: PostFields.AccountKey,
-          accountKey: params.accountKey.trim(),
-          treatBlankAsAccount: params.treatBlankAccountKeyAsMatch
-        })
-      : undefined;
-
-  const scheduled = await params.airtable.listAll<Post>(params.postsTableName, {
-    filterByFormula: accountFilter
-      ? `AND(${accountFilter}, {${PostFields.PostStatus}}="Scheduled", {${PostFields.ScheduledAt}}!="")`
-      : `AND({${PostFields.PostStatus}}="Scheduled", {${PostFields.ScheduledAt}}!="")`,
-    maxRecords: 50,
-    fields: [PostFields.ScheduledAt, PostFields.SeedUrl]
+  const scheduled = await params.store.listScheduledPosts({
+    accountKey: params.accountKey,
+    treatBlankAccountKeyAsMatch: params.treatBlankAccountKeyAsMatch,
+    maxRecords: 50
   });
   const overdue = scheduled.filter((p) => {
-    const dt = DateTime.fromISO(String(p.fields?.[PostFields.ScheduledAt] ?? "")).setZone(params.timezone);
+    const dt = DateTime.fromISO(String(p.scheduledAt ?? "")).setZone(params.timezone);
     return dt.isValid && dt < now.minus({ hours: 2 });
   });
 
-  const queueNonEmpty = await params.airtable.listAll<Post>(params.postsTableName, {
-    filterByFormula: accountFilter
-      ? `AND(${accountFilter}, OR({${PostFields.PostStatus}}="Generated", {${PostFields.PostStatus}}="Scheduled"))`
-      : `OR({${PostFields.PostStatus}}="Generated", {${PostFields.PostStatus}}="Scheduled")`,
-    maxRecords: 1,
-    fields: [PostFields.PostStatus]
+  const queueNonEmpty = await params.store.hasQueuePosts({
+    accountKey: params.accountKey,
+    treatBlankAccountKeyAsMatch: params.treatBlankAccountKeyAsMatch
   });
 
-  const lastPublished = await params.airtable.listAll<Post>(params.postsTableName, {
-    filterByFormula: accountFilter
-      ? `AND(${accountFilter}, {${PostFields.PostStatus}}="Published")`
-      : `{${PostFields.PostStatus}}="Published"`,
-    sortField: PostFields.PublishedAt,
-    sortDirection: "desc",
-    maxRecords: 1,
-    fields: [PostFields.PublishedAt]
+  const lastPublishedAtIso = await params.store.getLastPublishedAt({
+    accountKey: params.accountKey,
+    treatBlankAccountKeyAsMatch: params.treatBlankAccountKeyAsMatch
   });
-
-  const lastPublishedAtIso = String(lastPublished[0]?.fields?.[PostFields.PublishedAt] ?? "");
   const lastPublishedAt = lastPublishedAtIso ? DateTime.fromISO(lastPublishedAtIso).setZone(params.timezone) : undefined;
 
-  const stalePublishing = queueNonEmpty.length > 0 && (!lastPublishedAt || now.diff(lastPublishedAt, "hours").hours > 24);
+  const stalePublishing = queueNonEmpty && (!lastPublishedAt || now.diff(lastPublishedAt, "hours").hours > 24);
 
   if (overdue.length === 0 && !stalePublishing) return;
 

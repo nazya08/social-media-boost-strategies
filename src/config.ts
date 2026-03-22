@@ -1,6 +1,8 @@
 import "dotenv/config";
 import { z } from "zod";
 
+type DataStoreKind = "airtable" | "supabase";
+
 const boolFromEnv = (value: string | undefined, defaultValue: boolean) => {
   if (value === undefined || value.trim() === "") return defaultValue;
   return ["1", "true", "yes", "y", "on"].includes(value.trim().toLowerCase());
@@ -19,13 +21,26 @@ const logLevelFromEnv = (value: string | undefined, defaultValue: "INFO" | "WARN
 };
 
 export const ConfigSchema = z.object({
+  dataStore: z.object({
+    kind: z.enum(["airtable", "supabase"]).default("airtable")
+  }),
   airtable: z.object({
     apiKey: z.string().min(1),
     baseId: z.string().min(1),
     postsTableName: z.string().min(1).default("Posts"),
     donorsTableName: z.string().min(1).default("Threads Donors"),
     runLogsTableName: z.string().min(1).default("Run Logs")
-  }),
+  }).optional(),
+  supabase: z
+    .object({
+      url: z.string().url(),
+      serviceRoleKey: z.string().min(1),
+      tablePrefix: z.string().default(""),
+      donorsTableName: z.string().min(1).default("threads_donors"),
+      postsTableName: z.string().min(1).default("posts"),
+      runLogsTableName: z.string().min(1).default("run_logs")
+    })
+    .optional(),
   logging: z.object({
     runLogsMinLevel: z.enum(["INFO", "WARN", "ERROR", "CRITICAL"]).default("WARN")
   }),
@@ -94,14 +109,39 @@ export const loadConfig = (): AppConfig => {
     return hours.length > 0 ? Array.from(new Set(hours)).sort((a, b) => a - b) : [12, 15, 18, 21];
   };
 
+  const dataStoreKind = ((process.env.DATA_STORE ?? "airtable").trim().toLowerCase() || "airtable") as DataStoreKind;
+
+  const airtableRaw =
+    (process.env.AIRTABLE_API_KEY && process.env.AIRTABLE_API_KEY.trim()) ||
+    (process.env.AIRTABLE_BASE_ID && process.env.AIRTABLE_BASE_ID.trim())
+      ? {
+          apiKey: process.env.AIRTABLE_API_KEY,
+          baseId: process.env.AIRTABLE_BASE_ID,
+          postsTableName: process.env.AIRTABLE_TABLE_NAME ?? "Posts",
+          donorsTableName: process.env.AIRTABLE_DONORS_TABLE_NAME ?? "Threads Donors",
+          runLogsTableName: process.env.AIRTABLE_RUN_LOGS_TABLE_NAME ?? "Run Logs"
+        }
+      : undefined;
+
+  const supabaseRaw =
+    (process.env.SUPABASE_URL && process.env.SUPABASE_URL.trim()) ||
+    (process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.SUPABASE_SERVICE_ROLE_KEY.trim())
+      ? {
+          url: process.env.SUPABASE_URL,
+          serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+          tablePrefix: process.env.SUPABASE_TABLE_PREFIX ?? "",
+          donorsTableName: process.env.SUPABASE_DONORS_TABLE_NAME ?? "threads_donors",
+          postsTableName: process.env.SUPABASE_POSTS_TABLE_NAME ?? "posts",
+          runLogsTableName: process.env.SUPABASE_RUN_LOGS_TABLE_NAME ?? "run_logs"
+        }
+      : undefined;
+
   const raw = {
-    airtable: {
-      apiKey: process.env.AIRTABLE_API_KEY,
-      baseId: process.env.AIRTABLE_BASE_ID,
-      postsTableName: process.env.AIRTABLE_TABLE_NAME ?? "Posts",
-      donorsTableName: process.env.AIRTABLE_DONORS_TABLE_NAME ?? "Threads Donors",
-      runLogsTableName: process.env.AIRTABLE_RUN_LOGS_TABLE_NAME ?? "Run Logs"
+    dataStore: {
+      kind: dataStoreKind
     },
+    airtable: airtableRaw,
+    supabase: supabaseRaw,
     logging: {
       runLogsMinLevel: logLevelFromEnv(process.env.RUN_LOGS_MIN_LEVEL, "WARN")
     },
@@ -162,5 +202,18 @@ export const loadConfig = (): AppConfig => {
     const message = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
     throw new Error(`Invalid configuration: ${message}`);
   }
-  return parsed.data;
+
+  // Conditional requirements (keep errors readable).
+  const cfg = parsed.data;
+  if (cfg.dataStore.kind === "airtable") {
+    if (!cfg.airtable?.apiKey || !cfg.airtable?.baseId) {
+      throw new Error("Invalid configuration: airtable.apiKey/baseId are required when DATA_STORE=airtable");
+    }
+  } else {
+    if (!cfg.supabase?.url || !cfg.supabase?.serviceRoleKey) {
+      throw new Error("Invalid configuration: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required when DATA_STORE=supabase");
+    }
+  }
+
+  return cfg;
 };

@@ -1,15 +1,11 @@
 import { DateTime } from "luxon";
-import { AirtableClient } from "../airtable/airtableClient.js";
-import { PostFields } from "../airtable/fields.js";
 import { Logger } from "../logger.js";
+import { DataStore, Post as StorePost } from "../store/store.js";
 import { ThreadsClient } from "../services/threads.js";
 import { TelegramClient } from "../services/telegram.js";
 import { formatPublishProgress, parsePublishProgress, PublishProgress } from "../utils/publishProgress.js";
 import { safeJsonParse } from "../utils/text.js";
 import { isHttpUrl } from "../utils/url.js";
-import { accountKeyFilterFormula } from "../utils/airtableFormula.js";
-
-type Post = Record<string, unknown>;
 
 const isAuthError = (error: unknown) => {
   if (!(error instanceof Error)) return false;
@@ -22,8 +18,7 @@ const isMediaNotFoundError = (error: unknown) => {
 };
 
 export const publishNowJob = async (params: {
-  airtable: AirtableClient;
-  postsTableName: string;
+  store: DataStore;
   logger: Logger;
   threads: ThreadsClient;
   telegram?: TelegramClient;
@@ -44,52 +39,31 @@ export const publishNowJob = async (params: {
     return { attempted: 0, published: 0, failed: 0, criticalAlerts: 0 };
   }
 
-  const idsFilter =
-    params.recordIds && params.recordIds.length > 0
-      ? `OR(${params.recordIds.map((id) => `RECORD_ID()="${id}"`).join(",")})`
-      : undefined;
-  const publishingWithProgress = `AND({${PostFields.PostStatus}}="Publishing", {${PostFields.Error}}!="", LEFT({${PostFields.Error}}, 9)="PROGRESS:")`;
-  const publishingWithRootId = `AND({${PostFields.PostStatus}}="Publishing", {${PostFields.ThreadsRootId}}!="")`;
-  const basePublishable = `OR(${publishingWithProgress}, ${publishingWithRootId}, {${PostFields.PostStatus}}="Generated", AND({${PostFields.PostStatus}}="Failed", {${PostFields.FailureSubsystem}}="PUBLISH", {${PostFields.AttemptCount}}<3, NOT(REGEX_MATCH({${PostFields.Error}}, "HTTP 401|HTTP 403"))))`;
-
-  const accountFilter =
-    params.accountKey && params.accountKey.trim()
-      ? accountKeyFilterFormula({
-          fieldName: PostFields.AccountKey,
-          accountKey: params.accountKey.trim(),
-          treatBlankAsAccount: params.treatBlankAccountKeyAsMatch
-        })
-      : undefined;
-
-  const extraFilters = [idsFilter, accountFilter].filter(Boolean);
-  const filterByFormula = extraFilters.length > 0 ? `AND(${extraFilters.join(", ")}, ${basePublishable})` : basePublishable;
-
   const now = DateTime.now().setZone(params.timezone);
 
   // Recover posts stuck in Publishing (typically due to runtime timeout mid-thread).
   try {
-    const stuckBase = `AND({${PostFields.PostStatus}}="Publishing", {${PostFields.LastAttemptAt}}!="")`;
-    const stuckFilter = accountFilter ? `AND(${accountFilter}, ${stuckBase})` : stuckBase;
-    const stuck = await params.airtable.listAll<Post>(params.postsTableName, {
-      filterByFormula: stuckFilter,
-      maxRecords: 20,
-      fields: [PostFields.LastAttemptAt, PostFields.AttemptCount, PostFields.Error, PostFields.ThreadsRootId]
+    const stuck = await params.store.listStuckPublishing({
+      accountKey: params.accountKey,
+      treatBlankAccountKeyAsMatch: params.treatBlankAccountKeyAsMatch,
+      maxRecords: 20
     });
     const stuckMinutes = 20;
     for (const p of stuck) {
-      const lastAttemptIso = String(p.fields?.[PostFields.LastAttemptAt] ?? "");
+      const lastAttemptIso = String(p.lastAttemptAt ?? "");
       const lastAttempt = lastAttemptIso ? DateTime.fromISO(lastAttemptIso).setZone(params.timezone) : undefined;
-      const attempts = Number(p.fields?.[PostFields.AttemptCount] ?? 0);
-      const currentError = String(p.fields?.[PostFields.Error] ?? "");
+      const attempts = Number(p.attemptCount ?? 0);
+      const currentError = String(p.error ?? "");
       const hasProgress = Boolean(parsePublishProgress(currentError));
       const isStale = !lastAttempt || !lastAttempt.isValid || lastAttempt < now.minus({ minutes: stuckMinutes });
       if (!isStale) continue;
 
-      await params.airtable.updateRecord(params.postsTableName, p.id, {
-        [PostFields.PostStatus]: attempts >= 3 ? "Failed" : "Generated",
-        [PostFields.Error]: currentError || `Recovered from stuck Publishing (>${stuckMinutes}m). Please retry.`,
-        [PostFields.FailureSubsystem]: "PUBLISH"
-      } as any);
+      await params.store.updatePostForPublishAttempt({
+        postId: p.id,
+        postStatus: attempts >= 3 ? "Failed" : "Generated",
+        error: currentError || `Recovered from stuck Publishing (>${stuckMinutes}m). Please retry.`,
+        failureSubsystem: "PUBLISH"
+      });
       await params.logger.log({
         level: "WARN",
         subsystem: "PUBLISH",
@@ -107,25 +81,11 @@ export const publishNowJob = async (params: {
     });
   }
 
-  const candidates = await params.airtable.listAll<Post>(params.postsTableName, {
-    filterByFormula,
+  const candidates = await params.store.listPublishablePosts({
+    accountKey: params.accountKey,
+    treatBlankAccountKeyAsMatch: params.treatBlankAccountKeyAsMatch,
     maxRecords: params.maxToPublish ?? 10,
-    sortField: PostFields.SeedPublishedAt,
-    sortDirection: "desc",
-    fields: [
-      PostFields.PostStatus,
-      PostFields.Format,
-      PostFields.AttemptCount,
-      PostFields.ThreadPartsJson,
-      PostFields.SeedUrl,
-      PostFields.MediaUrl,
-      PostFields.MediaType,
-      PostFields.MediaAltText,
-      PostFields.Error,
-      PostFields.ThreadsRootId,
-      PostFields.ThreadsRootUrl,
-      PostFields.CtaUrl
-    ]
+    recordIds: params.recordIds
   });
 
   if (candidates.length === 0) {
@@ -142,17 +102,18 @@ export const publishNowJob = async (params: {
   let failedCount = 0;
   let criticalAlerts = 0;
   for (const post of candidates) {
-    const postId = post.id;
-    const currentStatus = String(post.fields?.[PostFields.PostStatus] ?? "").trim();
-    const format = String(post.fields?.[PostFields.Format] ?? "").trim();
-    const attemptCount = Number(post.fields?.[PostFields.AttemptCount] ?? 0);
-    const rawParts = safeJsonParse<string[]>(String(post.fields?.[PostFields.ThreadPartsJson] ?? "")) ?? [];
-    const existingError = String(post.fields?.[PostFields.Error] ?? "");
-    const existingRootId = String(post.fields?.[PostFields.ThreadsRootId] ?? "").trim();
-    const existingRootUrl = String(post.fields?.[PostFields.ThreadsRootUrl] ?? "").trim();
+    const p = post as StorePost;
+    const postId = p.id;
+    const currentStatus = String(p.postStatus ?? "").trim();
+    const format = String(p.format ?? "").trim();
+    const attemptCount = Number(p.attemptCount ?? 0);
+    const rawParts = Array.isArray(p.threadParts) ? p.threadParts : safeJsonParse<string[]>(String(p.threadParts ?? "")) ?? [];
+    const existingError = String(p.error ?? "");
+    const existingRootId = String(p.threadsRootId ?? "").trim();
+    const existingRootUrl = String(p.threadsRootUrl ?? "").trim();
     let lastProgress: PublishProgress | undefined = undefined;
 
-    const resolvedCtaUrl = String(params.ctaUrlOverride ?? String(post.fields?.[PostFields.CtaUrl] ?? "")).trim();
+    const resolvedCtaUrl = String(params.ctaUrlOverride ?? String(p.ctaUrl ?? "")).trim();
     const applyResolvedCtaOverride = (parts: string[]) => {
       const url = resolvedCtaUrl;
       if (!url || parts.length === 0) return parts;
@@ -171,9 +132,9 @@ export const publishNowJob = async (params: {
     // CTA must be ONLY in the last part (never injected into root).
     const parts = applyResolvedCtaOverride(rawParts);
 
-    const mediaUrl = String(post.fields?.[PostFields.MediaUrl] ?? "").trim();
-    const mediaType = String(post.fields?.[PostFields.MediaType] ?? "").trim();
-    const mediaAltText = String(post.fields?.[PostFields.MediaAltText] ?? "").trim();
+    const mediaUrl = String(p.mediaUrl ?? "").trim();
+    const mediaType = String(p.mediaType ?? "").trim();
+    const mediaAltText = String(p.mediaAltText ?? "").trim();
     const rootMedia =
       params.postMediaEnabled && mediaUrl && isHttpUrl(mediaUrl) && (mediaType === "IMAGE" || mediaType === "VIDEO")
         ? ({ type: mediaType, url: mediaUrl, altText: mediaAltText || undefined } as any)
@@ -223,13 +184,13 @@ export const publishNowJob = async (params: {
         } satisfies PublishProgress);
       lastProgress = progressState;
 
-      await params.airtable.updateRecord(params.postsTableName, postId, {
-        [PostFields.PostStatus]: "Publishing",
-        [PostFields.LastAttemptAt]: now.toISO(),
-        [PostFields.AttemptCount]: attemptCount + 1,
-        [PostFields.Error]: isResume ? formatPublishProgress({ ...progressState, updatedAtIso: now.toISO() ?? progressState.updatedAtIso }) : "",
-        ...(params.ctaUrlOverride ? { [PostFields.CtaUrl]: params.ctaUrlOverride } : {})
-      } as any);
+      await params.store.updatePostForPublishAttempt({
+        postId,
+        postStatus: "Publishing",
+        lastAttemptAtIso: now.toISO() ?? new Date().toISOString(),
+        attemptCount: attemptCount + 1,
+        error: isResume ? formatPublishProgress({ ...progressState, updatedAtIso: now.toISO() ?? progressState.updatedAtIso }) : ""
+      });
 
       let result;
       try {
@@ -240,11 +201,13 @@ export const publishNowJob = async (params: {
           progressState.updatedAtIso = DateTime.now().setZone(params.timezone).toISO() ?? new Date().toISOString();
           lastProgress = { ...progressState, publishedIds: progressState.publishedIds.slice() };
 
-          await params.airtable.updateRecord(params.postsTableName, postId, {
-            ...(progressState.rootId ? { [PostFields.ThreadsRootId]: progressState.rootId } : {}),
-            [PostFields.Error]: formatPublishProgress(progressState),
-            [PostFields.LastAttemptAt]: DateTime.now().setZone(params.timezone).toISO()
-          } as any);
+          await params.store.updatePostForPublishAttempt({
+            postId,
+            postStatus: "Publishing",
+            threadsRootId: progressState.rootId,
+            error: formatPublishProgress(progressState),
+            lastAttemptAtIso: DateTime.now().setZone(params.timezone).toISO() ?? new Date().toISOString()
+          });
         };
 
         const log = async (ev: any) => {
@@ -298,11 +261,13 @@ export const publishNowJob = async (params: {
             progressState.nextIndex = Math.max(progressState.nextIndex, ev.partIndex + 1);
             progressState.updatedAtIso = DateTime.now().setZone(params.timezone).toISO() ?? new Date().toISOString();
             lastProgress = { ...progressState, publishedIds: progressState.publishedIds.slice() };
-            await params.airtable.updateRecord(params.postsTableName, postId, {
-              ...(progressState.rootId ? { [PostFields.ThreadsRootId]: progressState.rootId } : {}),
-              [PostFields.Error]: formatPublishProgress(progressState),
-              [PostFields.LastAttemptAt]: DateTime.now().setZone(params.timezone).toISO()
-            } as any);
+            await params.store.updatePostForPublishAttempt({
+              postId,
+              postStatus: "Publishing",
+              threadsRootId: progressState.rootId,
+              error: formatPublishProgress(progressState),
+              lastAttemptAtIso: DateTime.now().setZone(params.timezone).toISO() ?? new Date().toISOString()
+            });
           };
 
           const log = async (ev: any) => {
@@ -343,14 +308,12 @@ export const publishNowJob = async (params: {
           throw err;
         }
       }
-      await params.airtable.updateRecord(params.postsTableName, postId, {
-        [PostFields.PostStatus]: "Published",
-        [PostFields.PublishedAt]: now.toISO(),
-        [PostFields.ThreadsRootId]: result.rootId,
-        [PostFields.ThreadsRootUrl]: result.rootPermalink ?? "",
-        [PostFields.FailureSubsystem]: null,
-        [PostFields.Error]: ""
-      } as any);
+      await params.store.markPostPublished({
+        postId,
+        publishedAtIso: now.toISO() ?? new Date().toISOString(),
+        threadsRootId: result.rootId,
+        threadsRootUrl: result.rootPermalink ?? ""
+      });
 
       await params.logger.log({
         level: "INFO",
@@ -369,14 +332,15 @@ export const publishNowJob = async (params: {
       const progressForError = lastProgress ?? parsePublishProgress(existingError);
       const errorFieldValue = progressForError ? formatPublishProgress(progressForError, errorMessage.slice(0, 800)) : errorMessage;
 
-      await params.airtable.updateRecord(params.postsTableName, postId, {
-        [PostFields.PostStatus]: hardFail || isAuthError(error) ? "Failed" : "Generated",
-        [PostFields.Error]: errorFieldValue,
-        [PostFields.LastAttemptAt]: now.toISO(),
-        [PostFields.AttemptCount]: nextAttempt,
-        [PostFields.FailureSubsystem]: "PUBLISH",
-        ...(progressForError?.rootId ? { [PostFields.ThreadsRootId]: progressForError.rootId } : existingRootId ? { [PostFields.ThreadsRootId]: existingRootId } : {})
-      } as any);
+      await params.store.updatePostForPublishAttempt({
+        postId,
+        postStatus: hardFail || isAuthError(error) ? "Failed" : "Generated",
+        error: errorFieldValue,
+        lastAttemptAtIso: now.toISO() ?? new Date().toISOString(),
+        attemptCount: nextAttempt,
+        failureSubsystem: "PUBLISH",
+        threadsRootId: progressForError?.rootId || existingRootId || undefined
+      });
 
       await params.logger.log({
         level: critical ? "CRITICAL" : "ERROR",
@@ -388,7 +352,7 @@ export const publishNowJob = async (params: {
       failedCount += 1;
 
       if (critical && params.telegram) {
-        const seedUrl = String(post.fields?.[PostFields.SeedUrl] ?? "");
+        const seedUrl = String(p.seedUrl ?? "");
         const summary = isAuthError(error) ? "CRITICAL AUTH" : "CRITICAL PUBLISH FAILED";
         const text = [
           summary,

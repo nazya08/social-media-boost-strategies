@@ -1,6 +1,5 @@
-import { AirtableClient } from "../airtable/airtableClient.js";
-import { PostFields } from "../airtable/fields.js";
 import { Logger } from "../logger.js";
+import { DataStore, Post as StorePost } from "../store/store.js";
 import { AnthropicClient } from "../services/anthropic.js";
 import {
   buildRootWithLines,
@@ -12,9 +11,6 @@ import {
   rootHasSwapLines
 } from "../utils/listSeed.js";
 import { toPreview } from "../utils/text.js";
-import { accountKeyFilterFormula } from "../utils/airtableFormula.js";
-
-type Post = Record<string, unknown>;
 
 const detectLanguage = (text: string): "UA" | "EN" => {
   const sample = text.slice(0, 2000);
@@ -145,8 +141,7 @@ const fallbackInjectListsFromSeed = (params: {
 };
 
 export const generateJob = async (params: {
-  airtable: AirtableClient;
-  postsTableName: string;
+  store: DataStore;
   logger: Logger;
   anthropic: AnthropicClient;
   maxCharsPerPart: number;
@@ -164,43 +159,28 @@ export const generateJob = async (params: {
   let generatedCount = 0;
   let failedCount = 0;
 
-  const baseFilter = `OR({${PostFields.PostStatus}}="Seeded", AND({${PostFields.PostStatus}}="Failed", {${PostFields.ThreadPartsJson}}=""))`;
-  const idsFilter =
-    params.recordIds && params.recordIds.length > 0
-      ? `OR(${params.recordIds.map((id) => `RECORD_ID()="${id}"`).join(",")})`
-      : undefined;
-  const accountFilter =
-    params.accountKey && params.accountKey.trim()
-      ? accountKeyFilterFormula({
-          fieldName: PostFields.AccountKey,
-          accountKey: params.accountKey.trim(),
-          treatBlankAsAccount: params.treatBlankAccountKeyAsMatch
-        })
-      : undefined;
-
-  const extraFilters = [idsFilter, accountFilter].filter(Boolean);
-  const filterByFormula = extraFilters.length > 0 ? `AND(${extraFilters.join(", ")}, ${baseFilter})` : baseFilter;
-
-  const posts = await params.airtable.listAll<Post>(params.postsTableName, {
-    filterByFormula,
-    maxRecords: params.recordIds?.length ? params.recordIds.length : params.maxRecords
+  const posts = await params.store.listPostsForGenerate({
+    accountKey: params.accountKey,
+    treatBlankAccountKeyAsMatch: params.treatBlankAccountKeyAsMatch,
+    maxRecords: params.recordIds?.length ? params.recordIds.length : params.maxRecords,
+    recordIds: params.recordIds
   });
 
   for (const post of posts) {
-    const postId = post.id;
-    const seedTitle = String(post.fields?.[PostFields.Title] ?? "Seed");
-    const seedText = String(post.fields?.[PostFields.SeedText] ?? "");
-    const seedUrl = String(post.fields?.[PostFields.SeedUrl] ?? "") || undefined;
-    const langRaw = String(post.fields?.[PostFields.Language] ?? "UA").trim().toUpperCase();
-    const configuredLanguage = langRaw === "EN" ? ("EN" as const) : ("UA" as const);
-    const language = configuredLanguage;
+    const p = post as StorePost;
+    const postId = p.id;
+    const seedTitle = String(p.title ?? "Seed");
+    const seedText = String(p.seedText ?? "");
+    const seedUrl = String(p.seedUrl ?? "") || undefined;
+    const language = p.language === "EN" ? ("EN" as const) : ("UA" as const);
 
-    const configuredCtaUrl = params.ctaUrlOverride ?? String(post.fields?.[PostFields.CtaUrl] ?? "");
+    const configuredCtaUrl = String(params.ctaUrlOverride ?? p.ctaUrl ?? "").trim();
     const ctaUrl = configuredCtaUrl || "https://t.me/solutions_247ai";
-    const ctaText =
-      language === "EN"
-        ? params.ctaTextEnOverride ?? String(post.fields?.[PostFields.CtaText] ?? "More about AI & automation here:")
+    const ctaText = language === "EN" ? String(params.ctaTextEnOverride ?? p.ctaText ?? "More about AI & automation here:") : String(params.ctaTextUaOverride ?? p.ctaText ?? "Більше про AI та автоматизацію тут:");
+      /* language === "EN"
+        ? String(params.ctaTextEnOverride ?? p.ctaText ?? "More about AI & automation here:")
         : params.ctaTextUaOverride ?? String(post.fields?.[PostFields.CtaText] ?? "Більше про AI та автоматизацію тут:");
+ */
 
     try {
       processed += 1;
@@ -251,17 +231,15 @@ export const generateJob = async (params: {
         maxChars: params.maxCharsPerPart
       });
 
-      await params.airtable.updateRecord(params.postsTableName, postId, {
-        [PostFields.PostStatus]: "Generated",
-        [PostFields.Format]: generated.format,
-        [PostFields.Language]: generated.language,
-        [PostFields.ThreadPartsJson]: JSON.stringify(adjustedParts),
-        [PostFields.ThreadPreview]: toPreview(adjustedParts),
-        [PostFields.CtaText]: ctaText,
-        [PostFields.CtaUrl]: ctaUrl,
-        [PostFields.Error]: "",
-        [PostFields.FailureSubsystem]: null
-      } as any);
+      await params.store.markPostGenerated({
+        postId,
+        format: generated.format,
+        language: generated.language,
+        threadParts: adjustedParts,
+        threadPreview: toPreview(adjustedParts),
+        ctaText,
+        ctaUrl
+      });
       generatedCount += 1;
 
       await params.logger.log({
@@ -278,11 +256,11 @@ export const generateJob = async (params: {
         }
       });
     } catch (error) {
-      await params.airtable.updateRecord(params.postsTableName, postId, {
-        [PostFields.PostStatus]: "Failed",
-        [PostFields.Error]: error instanceof Error ? error.message : String(error),
-        [PostFields.FailureSubsystem]: "GENERATE"
-      } as any);
+      await params.store.markPostFailed({
+        postId,
+        subsystem: "GENERATE",
+        errorMessage: error instanceof Error ? error.message : String(error)
+      });
       failedCount += 1;
       await params.logger.log({
         level: "ERROR",
@@ -299,7 +277,7 @@ export const generateJob = async (params: {
     subsystem: "GENERATE",
     message:
       posts.length === 0
-        ? `Generate: no Seeded posts (table: ${params.postsTableName})`
+        ? `Generate: no Seeded posts`
         : `Generate: processed=${processed}, generated=${generatedCount}, failed=${failedCount}`,
     meta: { processed, generatedCount, failedCount }
   });

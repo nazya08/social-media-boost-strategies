@@ -4,8 +4,10 @@
 node_modules/
 dist/
 .DS_Store
+.npm-cache/
+.gitconfig
+data/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-

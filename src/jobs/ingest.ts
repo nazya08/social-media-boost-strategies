@@ -1,14 +1,9 @@
 import Parser from "rss-parser";
-import { AirtableClient } from "../airtable/airtableClient.js";
-import { DonorFields, PostFields } from "../airtable/fields.js";
 import { Logger } from "../logger.js";
+import { DataStore } from "../store/store.js";
 import { sha256Hex } from "../utils/crypto.js";
 import { normalizeForHash } from "../utils/text.js";
 import { isHttpUrl } from "../utils/url.js";
-import { accountKeyFilterFormula, escapeAirtableString } from "../utils/airtableFormula.js";
-
-type Donor = Record<string, unknown>;
-type Post = Record<string, unknown>;
 
 const guessMediaType = (url: string, mimeType?: string) => {
   const lowerUrl = url.toLowerCase();
@@ -54,9 +49,7 @@ const extractMediaFromItem = (item: any): { url: string; type?: "IMAGE" | "VIDEO
 };
 
 export const ingestJob = async (params: {
-  airtable: AirtableClient;
-  donorsTableName: string;
-  postsTableName: string;
+  store: DataStore;
   logger: Logger;
   timezone: string;
   maxItemsPerDonor: number;
@@ -74,6 +67,7 @@ export const ingestJob = async (params: {
       "User-Agent": "ThreadsAutoposter/1.0 (+rss-parser)"
     }
   });
+
   const createdPostRecordIds: string[] = [];
   let donorsCount = 0;
   let processedDonors = 0;
@@ -82,72 +76,38 @@ export const ingestJob = async (params: {
   let skippedMediaSeeds = 0;
   let errorsCount = 0;
 
-  const coerceBool = (value: unknown) => {
-    if (typeof value === "boolean") return value;
-    if (typeof value === "number") return value !== 0;
-    if (typeof value === "string") {
-      const v = value.trim().toLowerCase();
-      if (!v) return undefined;
-      if (["1", "true", "yes", "y", "on"].includes(v)) return true;
-      if (["0", "false", "no", "n", "off"].includes(v)) return false;
-    }
-    return undefined;
-  };
-
-  const donorsBaseFilter = `AND({${DonorFields.Status}}="Active", {${DonorFields.FeedUrl}}!="")`;
-  const donorsAccountFilter =
-    params.accountKey && params.accountKey.trim()
-      ? accountKeyFilterFormula({
-          fieldName: DonorFields.AccountKey,
-          accountKey: params.accountKey.trim(),
-          treatBlankAsAccount: params.treatBlankAccountKeyAsMatch
-        })
-      : undefined;
-
-  const donorsFilterByFormula = donorsAccountFilter ? `AND(${donorsBaseFilter}, ${donorsAccountFilter})` : donorsBaseFilter;
-
-  const donors = await params.airtable.listAll<Donor>(params.donorsTableName, {
-    filterByFormula: donorsFilterByFormula,
+  const donors = await params.store.listActiveDonors({
+    accountKey: params.accountKey,
+    treatBlankAccountKeyAsMatch: params.treatBlankAccountKeyAsMatch,
     maxRecords: 50
   });
   donorsCount = donors.length;
 
   for (const donor of donors) {
-    const feedUrl = String(donor.fields?.[DonorFields.FeedUrl] ?? "").trim();
-    const username = String(donor.fields?.[DonorFields.Username] ?? "").trim() || donor.id;
+    const feedUrl = String(donor.feedUrl ?? "").trim();
+    const username = String(donor.username ?? "").trim() || donor.id;
     if (!feedUrl) continue;
 
     try {
       processedDonors += 1;
       const feed = await parser.parseURL(feedUrl);
       const items = feed.items ?? [];
-      const donorLanguageRaw = String(donor.fields?.[DonorFields.Language] ?? "UA").trim().toUpperCase();
-      const donorLanguage = donorLanguageRaw === "EN" ? "EN" : "UA";
-      const donorSkipMedia = coerceBool(donor.fields?.[DonorFields.SkipMedia]);
-      const skipMedia = donorSkipMedia ?? params.skipMediaDefault ?? false;
+      const donorLanguage = donor.language === "EN" ? "EN" : "UA";
+      const skipMedia = (donor.skipMedia ?? params.skipMediaDefault) ?? false;
 
-      const parseItemDate = (it: any) => {
-        const iso = String(it?.isoDate ?? it?.pubDate ?? "").trim();
-        const dt = iso ? new Date(iso) : undefined;
-        return dt && !Number.isNaN(dt.getTime()) ? dt.getTime() : 0;
-      };
+      const take = Math.max(1, Math.min(params.maxItemsPerDonor, 20));
+      const top = items.slice(0, take);
 
-      const selected = items
-        .slice()
-        .sort((a: any, b: any) => parseItemDate(b) - parseItemDate(a))
-        .slice(0, Math.max(1, Math.min(params.maxItemsPerDonor, 20)));
+      for (const item of top) {
+        const title = String(item?.title ?? "").trim();
+        const link = String(item?.link ?? "").trim();
+        const publishedAtRaw = item?.isoDate ?? item?.pubDate ?? "";
+        const publishedAt = publishedAtRaw ? new Date(publishedAtRaw).toISOString() : undefined;
+        const seedText = String(item?.contentSnippet ?? item?.content ?? item?.summary ?? "").trim();
+        const media = extractMediaFromItem(item);
 
-      for (const item of selected) {
-        const title = String(item.title ?? "").trim() || "Seed";
-        const link = String(item.link ?? "").trim();
-        const seedText =
-          String((item as any).contentSnippet ?? "").trim() ||
-          String((item as any).content ?? "").trim() ||
-          title;
-        const publishedAt = String((item as any).isoDate ?? (item as any).pubDate ?? "").trim();
-        const rawMedia = extractMediaFromItem(item);
-        const media = rawMedia?.url && isHttpUrl(rawMedia.url) ? rawMedia : undefined;
-
+        if (!title && !seedText) continue;
+        if (link && !isHttpUrl(link)) continue;
         if (skipMedia && media?.url) {
           skippedMediaSeeds += 1;
           continue;
@@ -157,88 +117,61 @@ export const ingestJob = async (params: {
         const seedHash = sha256Hex(hashInput);
 
         if (link) {
-          const urlFilter = `{${PostFields.SeedUrl}}="${escapeAirtableString(link)}"`;
-          const accountFilter =
-            params.accountKey && params.accountKey.trim()
-              ? accountKeyFilterFormula({
-                  fieldName: PostFields.AccountKey,
-                  accountKey: params.accountKey.trim(),
-                  treatBlankAsAccount: params.treatBlankAccountKeyAsMatch
-                })
-              : undefined;
-          const filterByFormula = accountFilter ? `AND(${urlFilter}, ${accountFilter})` : urlFilter;
-          const existingByUrl = await params.airtable.listAll<Post>(params.postsTableName, {
-            filterByFormula,
-            maxRecords: 1
+          const existsByUrl = await params.store.hasPostBySeedUrl({
+            seedUrl: link,
+            accountKey: params.accountKey,
+            treatBlankAccountKeyAsMatch: params.treatBlankAccountKeyAsMatch
           });
-          if (existingByUrl.length > 0) {
+          if (existsByUrl) {
             dedupedSeeds += 1;
             continue;
           }
         }
 
-        const hashFilter = `{${PostFields.SeedHash}}="${escapeAirtableString(seedHash)}"`;
-        const accountFilter =
-          params.accountKey && params.accountKey.trim()
-            ? accountKeyFilterFormula({
-                fieldName: PostFields.AccountKey,
-                accountKey: params.accountKey.trim(),
-                treatBlankAsAccount: params.treatBlankAccountKeyAsMatch
-              })
-            : undefined;
-        const hashFilterByFormula = accountFilter ? `AND(${hashFilter}, ${accountFilter})` : hashFilter;
-
-        const existing = await params.airtable.listAll<Post>(params.postsTableName, {
-          filterByFormula: hashFilterByFormula,
-          maxRecords: 1
+        const existsByHash = await params.store.hasPostBySeedHash({
+          seedHash,
+          accountKey: params.accountKey,
+          treatBlankAccountKeyAsMatch: params.treatBlankAccountKeyAsMatch
         });
-        if (existing.length > 0) {
+        if (existsByHash) {
           dedupedSeeds += 1;
           continue;
         }
 
-        const fields: Record<string, unknown> = {
-          [PostFields.Title]: title,
-          [PostFields.SeedText]: seedText,
-          [PostFields.SeedUrl]: link || undefined,
-          [PostFields.SeedPublishedAt]: publishedAt || undefined,
-          [PostFields.SeedAuthor]: username || undefined,
-          [PostFields.SeedHash]: seedHash,
-          ...(params.accountKey ? { [PostFields.AccountKey]: params.accountKey } : {}),
-          [PostFields.PostStatus]: "Seeded",
-          [PostFields.Language]: donorLanguage,
-          [PostFields.CtaText]: donorLanguage === "EN" ? params.ctaTextEn : params.ctaTextUa,
-          [PostFields.CtaUrl]: params.ctaUrl,
-          [PostFields.Source]: [donor.id],
-          ...(media?.url ? { [PostFields.MediaUrl]: media.url } : {}),
-          ...(media?.type ? { [PostFields.MediaType]: media.type } : {}),
-          ...(media?.url ? { [PostFields.MediaAltText]: title } : {})
-        };
+        const created = await params.store.createSeedPost({
+          title,
+          seedText,
+          seedUrl: link || undefined,
+          seedPublishedAtIso: publishedAt,
+          seedAuthor: username || undefined,
+          seedHash,
+          language: donorLanguage,
+          ctaText: donorLanguage === "EN" ? params.ctaTextEn : params.ctaTextUa,
+          ctaUrl: params.ctaUrl,
+          sourceId: donor.id,
+          mediaUrl: media?.url,
+          mediaType: media?.type,
+          mediaAltText: media?.url ? title : undefined,
+          accountKey: params.accountKey
+        });
 
-        const created = await params.airtable.createRecord(params.postsTableName, fields);
-        createdPostRecordIds.push(created.id);
+        createdPostRecordIds.push(created.postId);
         newSeeds += 1;
       }
 
-      await params.airtable.updateRecord(params.donorsTableName, donor.id, {
-        [DonorFields.LastFetchedAt]: new Date().toISOString()
-      } as any);
+      await params.store.touchDonorFetchedAt({ donorId: donor.id, fetchedAtIso: new Date().toISOString() });
     } catch (error) {
       errorsCount += 1;
 
       const statusCode = (error as any)?.statusCode;
-      const is402 =
-        statusCode === 402 || (error instanceof Error && /status code\s*402/i.test(String(error.message ?? "")));
+      const is402 = statusCode === 402 || (error instanceof Error && /status code\s*402/i.test(String(error.message ?? "")));
       if (is402 && params.autoDisableOn402) {
         try {
           const nowIso = new Date().toISOString();
-          const existingNotes = String(donor.fields?.[DonorFields.Notes] ?? "").trim();
+          const existingNotes = String(donor.notes ?? "").trim();
           const noteLine = `[AUTO] Disabled donor due to RSS 402 (Payment Required) at ${nowIso}`;
           const notes = existingNotes ? `${existingNotes}\n${noteLine}` : noteLine;
-          await params.airtable.updateRecord(params.donorsTableName, donor.id, {
-            [DonorFields.Status]: "Inactive",
-            [DonorFields.Notes]: notes
-          } as any);
+          await params.store.updateDonor({ donorId: donor.id, status: "Inactive", notes });
         } catch {
           // ignore donor status update failures
         }
@@ -259,10 +192,11 @@ export const ingestJob = async (params: {
     subsystem: "INGEST",
     message:
       donorsCount === 0
-        ? `Ingest: no active donors with Feed URL (table: ${params.donorsTableName})`
+        ? `Ingest: no active donors with Feed URL`
         : `Ingest: donors=${donorsCount}, processed=${processedDonors}, new_seeds=${newSeeds}, deduped=${dedupedSeeds}, skipped_media=${skippedMediaSeeds}, errors=${errorsCount}`,
     meta: { donorsCount, processedDonors, newSeeds, dedupedSeeds, skippedMediaSeeds, errorsCount }
   });
 
   return { createdPostRecordIds, newSeeds, dedupedSeeds, skippedMediaSeeds, donorsCount, processedDonors, errorsCount };
 };
+
