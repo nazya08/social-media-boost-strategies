@@ -69,7 +69,12 @@ export const ConfigSchema = z.object({
     postMediaEnabled: z.boolean().default(false),
     publishMaxPerRun: z.number().int().min(1).max(10).default(1),
     ctaUrl: z.string().url().default("https://t.me/solutions_247ai"),
-    ctaTextEn: z.string().min(1).default("More about AI & automation here:"),
+    ctaTextEn: z
+      .string()
+      .min(1)
+      .default(
+        "Tired of wasting time searching for AI tools?\n500+ tools. 100+ prompts.\nOrganized by niche. Ready to use.\n\nThe Ultimate AI Power Kit gives you everything\nyou need to work smarter with AI \u{1F447}"
+      ),
     ctaTextUa: z.string().min(1).default("Більше про AI та автоматизацію тут:"),
     dailyBatchEnabled: z.boolean().default(true),
     dailyBatchHour: z.number().int().min(0).max(23).default(9),
@@ -170,7 +175,9 @@ export const loadConfig = (): AppConfig => {
       postMediaEnabled: boolFromEnv(process.env.POST_MEDIA_ENABLED, false),
       publishMaxPerRun: intFromEnv(process.env.PUBLISH_MAX_PER_RUN, 1),
       ctaUrl: process.env.CTA_URL ?? "https://t.me/solutions_247ai",
-      ctaTextEn: process.env.CTA_TEXT_EN ?? "More about AI & automation here:",
+      ctaTextEn:
+        process.env.CTA_TEXT_EN ??
+        "Tired of wasting time searching for AI tools?\n500+ tools. 100+ prompts.\nOrganized by niche. Ready to use.\n\nThe Ultimate AI Power Kit gives you everything\nyou need to work smarter with AI \u{1F447}",
       ctaTextUa: process.env.CTA_TEXT_UA ?? "Більше про AI та автоматизацію тут:",
       dailyBatchEnabled: boolFromEnv(process.env.DAILY_BATCH_ENABLED, true),
       dailyBatchHour: intFromEnv(process.env.DAILY_BATCH_HOUR, 9),

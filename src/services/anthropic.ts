@@ -214,7 +214,7 @@ export class AnthropicClient {
     const seedUserText = `${userSeed}\n\nUse the tool \`submit_thread\` to return the result. parts: root first, CTA last.`;
     let parsed = await callAnthropic(system, seedUserText);
     let sanitizedParts = parsed.parts.map((p: string) => clamp(String(p ?? ""), input.maxCharsPerPart).trim());
-    const expectedCta = `${input.ctaText} ${input.ctaUrl}`.trim();
+    const expectedCta = clamp(`${input.ctaText} ${input.ctaUrl}`.trim(), input.maxCharsPerPart).trim();
     const last = sanitizedParts[sanitizedParts.length - 1] ?? "";
     if (!last.includes(input.ctaUrl)) {
       sanitizedParts[sanitizedParts.length - 1] = expectedCta;
