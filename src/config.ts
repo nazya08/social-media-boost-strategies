@@ -1,6 +1,5 @@
 import "dotenv/config";
 import { z } from "zod";
-import { DEFAULT_CTA_TEXT_EN } from "./cta.js";
 
 type DataStoreKind = "airtable" | "supabase";
 
@@ -73,7 +72,9 @@ export const ConfigSchema = z.object({
     ctaTextEn: z
       .string()
       .min(1)
-      .default(DEFAULT_CTA_TEXT_EN),
+      .default(
+        "Tired of wasting time searching for AI tools?\n500+ tools. 100+ prompts.\nOrganized by niche. Ready to use.\n\nThe Ultimate AI Power Kit gives you everything\nyou need to work smarter with AI \u{1F447}"
+      ),
     ctaTextUa: z.string().min(1).default("Більше про AI та автоматизацію тут:"),
     dailyBatchEnabled: z.boolean().default(true),
     dailyBatchHour: z.number().int().min(0).max(23).default(9),
@@ -174,7 +175,9 @@ export const loadConfig = (): AppConfig => {
       postMediaEnabled: boolFromEnv(process.env.POST_MEDIA_ENABLED, false),
       publishMaxPerRun: intFromEnv(process.env.PUBLISH_MAX_PER_RUN, 1),
       ctaUrl: process.env.CTA_URL ?? "https://t.me/solutions_247ai",
-      ctaTextEn: process.env.CTA_TEXT_EN ?? DEFAULT_CTA_TEXT_EN,
+      ctaTextEn:
+        process.env.CTA_TEXT_EN ??
+        "Tired of wasting time searching for AI tools?\n500+ tools. 100+ prompts.\nOrganized by niche. Ready to use.\n\nThe Ultimate AI Power Kit gives you everything\nyou need to work smarter with AI \u{1F447}",
       ctaTextUa: process.env.CTA_TEXT_UA ?? "Більше про AI та автоматизацію тут:",
       dailyBatchEnabled: boolFromEnv(process.env.DAILY_BATCH_ENABLED, true),
       dailyBatchHour: intFromEnv(process.env.DAILY_BATCH_HOUR, 9),

@@ -13,7 +13,6 @@ import { AirtableClient } from "./airtable/airtableClient.js";
 import { AirtableStore } from "./store/airtableStore.js";
 import { SupabaseStore } from "./store/supabaseStore.js";
 import { DataStore } from "./store/store.js";
-import { DEFAULT_CTA_TEXT_UA } from "./cta.js";
 
 export type RunOnceSummary = {
   skipped?: { reason: string };
@@ -111,15 +110,6 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
 
     try {
       const accountCtaUrl = String(process.env[`CTA_URL_${key}`] ?? "").trim() || config.runtime.ctaUrl;
-      const accountCtaTextEn = String(process.env[`CTA_TEXT_EN_${key}`] ?? "").trim() || config.runtime.ctaTextEn;
-      const accountCtaTextUa =
-        String(process.env[`CTA_TEXT_UA_${key}`] ?? "").trim() || String(process.env.CTA_TEXT_UA ?? "").trim() || DEFAULT_CTA_TEXT_UA;
-
-      const ingestLanguageConfiguredRaw =
-        String(process.env[`INGEST_LANGUAGE_${key}`] ?? "").trim() || String(process.env.INGEST_LANGUAGE ?? "").trim();
-      const ingestLanguageOverrideRaw = ingestLanguageConfiguredRaw || (account.isDefault ? "EN" : "UA");
-      const ingestLanguageOverride =
-        ingestLanguageOverrideRaw.toUpperCase() === "EN" ? ("EN" as const) : ingestLanguageOverrideRaw.toUpperCase() === "UA" ? ("UA" as const) : undefined;
       const accountSkipMedia =
         String(process.env[`INGEST_SKIP_MEDIA_${key}`] ?? "").trim() !== ""
           ? ["1", "true", "yes", "y", "on"].includes(String(process.env[`INGEST_SKIP_MEDIA_${key}`] ?? "").trim().toLowerCase())
@@ -133,13 +123,12 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
         timezone: config.runtime.timezone,
         maxItemsPerDonor: config.runtime.ingestMaxItemsPerDonor,
         ctaUrl: accountCtaUrl,
-        ctaTextEn: accountCtaTextEn,
-        ctaTextUa: accountCtaTextUa,
+        ctaTextEn: config.runtime.ctaTextEn,
+        ctaTextUa: config.runtime.ctaTextUa,
         skipMediaDefault: accountSkipMedia,
         autoDisableOn402: config.runtime.ingestAutoDisableOn402,
         accountKey: key,
-        treatBlankAccountKeyAsMatch: account.isDefault,
-        languageOverride: ingestLanguageOverride
+        treatBlankAccountKeyAsMatch: account.isDefault
       });
 
       const recordIds = ingestResult.createdPostRecordIds;
@@ -155,8 +144,8 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
           maxRecords: Math.max(1, Math.min(recordIds.length, config.runtime.generateMaxRecords)),
           recordIds,
           ctaUrlOverride: accountCtaUrl,
-          ctaTextEnOverride: accountCtaTextEn,
-          ctaTextUaOverride: accountCtaTextUa,
+          ctaTextEnOverride: config.runtime.ctaTextEn,
+          ctaTextUaOverride: config.runtime.ctaTextUa,
           accountKey: key,
           treatBlankAccountKeyAsMatch: account.isDefault
         });
@@ -173,8 +162,8 @@ export const runOnce = async (): Promise<RunOnceSummary> => {
           partsTargetMax: config.runtime.partsTargetMax,
           maxRecords: remainingGenerate,
           ctaUrlOverride: accountCtaUrl,
-          ctaTextEnOverride: accountCtaTextEn,
-          ctaTextUaOverride: accountCtaTextUa,
+          ctaTextEnOverride: config.runtime.ctaTextEn,
+          ctaTextUaOverride: config.runtime.ctaTextUa,
           accountKey: key,
           treatBlankAccountKeyAsMatch: account.isDefault
         });
