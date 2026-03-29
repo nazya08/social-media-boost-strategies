@@ -58,6 +58,7 @@ export const ingestJob = async (params: {
   ctaTextUa: string;
   skipMediaDefault?: boolean;
   autoDisableOn402?: boolean;
+  languageOverride?: "UA" | "EN";
   accountKey?: string;
   treatBlankAccountKeyAsMatch?: boolean;
 }) => {
@@ -92,7 +93,7 @@ export const ingestJob = async (params: {
       processedDonors += 1;
       const feed = await parser.parseURL(feedUrl);
       const items = feed.items ?? [];
-      const donorLanguage = donor.language === "EN" ? "EN" : "UA";
+      const donorLanguage = params.languageOverride ? params.languageOverride : donor.language === "EN" ? "EN" : "UA";
       const skipMedia = (donor.skipMedia ?? params.skipMediaDefault) ?? false;
 
       const take = Math.max(1, Math.min(params.maxItemsPerDonor, 20));
@@ -199,4 +200,3 @@ export const ingestJob = async (params: {
 
   return { createdPostRecordIds, newSeeds, dedupedSeeds, skippedMediaSeeds, donorsCount, processedDonors, errorsCount };
 };
-
