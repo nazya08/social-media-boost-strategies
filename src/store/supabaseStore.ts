@@ -61,9 +61,7 @@ export class SupabaseStore implements DataStore {
       .eq("status", "Active")
       .neq("feed_url", "")
       .limit(params.maxRecords);
-    // Donors are typically shared across accounts (single curated donor pool), while posts remain account-scoped.
-    // Always include DEFAULT/blank donors for any accountKey to avoid duplicating donors per account.
-    q = this.applyAccountScope(q as any, { ...params, treatBlankAccountKeyAsMatch: true }) as any;
+    q = this.applyAccountScope(q as any, params) as any;
     const { data, error } = await q;
     if (error) throw new Error(`Supabase listActiveDonors failed: ${error.message}`);
     return (data ?? []).map((r: SupabaseRow) => ({
