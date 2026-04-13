@@ -176,9 +176,9 @@ export const generateJob = async (params: {
 
     const configuredCtaUrl = String(params.ctaUrlOverride ?? p.ctaUrl ?? "").trim();
     const ctaUrl = configuredCtaUrl || "https://t.me/solutions_247ai";
-    const ctaText = language === "EN" ? String(params.ctaTextEnOverride ?? p.ctaText ?? "Tired of wasting time searching for AI tools?\n\n500+ tools. 100+ prompts.\nOrganized by niche. Ready to use.\n\n\nThe Ultimate AI Power Kit gives you everything\nyou need to work smarter with AI 👇") : String(params.ctaTextUaOverride ?? p.ctaText ?? "Більше про AI та автоматизацію тут:");
+    const ctaText = language === "EN" ? String(params.ctaTextEnOverride ?? p.ctaText ?? "Tired of wasting time searching for AI tools?\n\n500+ tools. 100+ prompts.\nOrganized by niche. Ready to use.\n\n\nThe Ultimate AI Power Kit gives you everything\nyou need to work smarter with AI\n\n76% off — today only 👇") : String(params.ctaTextUaOverride ?? p.ctaText ?? "Більше про AI та автоматизацію тут:");
       /* language === "EN"
-        ? String(params.ctaTextEnOverride ?? p.ctaText ?? "Tired of wasting time searching for AI tools?\n\n500+ tools. 100+ prompts.\nOrganized by niche. Ready to use.\n\n\nThe Ultimate AI Power Kit gives you everything\nyou need to work smarter with AI 👇")
+        ? String(params.ctaTextEnOverride ?? p.ctaText ?? "Tired of wasting time searching for AI tools?\n\n500+ tools. 100+ prompts.\nOrganized by niche. Ready to use.\n\n\nThe Ultimate AI Power Kit gives you everything\nyou need to work smarter with AI\n\n76% off — today only 👇")
         : params.ctaTextUaOverride ?? String(post.fields?.[PostFields.CtaText] ?? "Більше про AI та автоматизацію тут:");
  */
 
