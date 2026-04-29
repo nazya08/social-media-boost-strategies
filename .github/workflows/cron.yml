@@ -5,10 +5,10 @@ on:
     - cron: "0 */2 * * *"   # DEFAULT account
     - cron: "30 */2 * * *"  # AI_BUILDERS_LAB account
     - cron: "15 */2 * * *"  # AI_SOLUTIONSHUB account
-    - cron: "5 */2 * * *"   # AI_GROWTHHUB247 account
-    - cron: "20 */2 * * *"  # AI_DAILY247 account
-    - cron: "35 */2 * * *"  # AI_DIARYLAB account
-    - cron: "50 */2 * * *"  # 247AI_BUILDS account
+    - cron: "5 */3 * * *"   # AI_GROWTHHUB247 account
+    - cron: "20 */3 * * *"  # AI_DAILY247 account
+    - cron: "35 */3 * * *"  # AI_DIARYLAB account
+    - cron: "50 */3 * * *"  # 247AI_BUILDS account
   workflow_dispatch: {}
 
 jobs:
@@ -30,10 +30,10 @@ jobs:
           case "${{ github.event.schedule }}" in
             "30 */2 * * *") ACCOUNTS="AI_BUILDERS_LAB" ;;
             "15 */2 * * *") ACCOUNTS="AI_SOLUTIONSHUB" ;;
-            "5 */2 * * *")  ACCOUNTS="AI_GROWTHHUB247" ;;
-            "20 */2 * * *") ACCOUNTS="AI_DAILY247" ;;
-            "35 */2 * * *") ACCOUNTS="AI_DIARYLAB" ;;
-            "50 */2 * * *") ACCOUNTS="247AI_BUILDS" ;;
+            "5 */3 * * *")  ACCOUNTS="AI_GROWTHHUB247" ;;
+            "20 */3 * * *") ACCOUNTS="AI_DAILY247" ;;
+            "35 */3 * * *") ACCOUNTS="AI_DIARYLAB" ;;
+            "50 */3 * * *") ACCOUNTS="247AI_BUILDS" ;;
           esac
 
           URL="$CRON_URL"
