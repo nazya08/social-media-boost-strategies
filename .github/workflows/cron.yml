@@ -4,7 +4,7 @@ on:
   schedule:
     - cron: "0 */2 * * *"   # DEFAULT account
     - cron: "30 */4 * * *"  # AI_BUILDERS_LAB account
-    - cron: "15 */4 * * *"  # AI_SOLUTIONSHUB account
+    # - cron: "15 */4 * * *"  # AI_SOLUTIONSHUB account — PAUSED 2026-05-04 (Threads API block 2207051)
     - cron: "5 */3 * * *"   # AI_GROWTHHUB247 account
     - cron: "20 */3 * * *"  # AI_DAILY247 account
     - cron: "35 */3 * * *"  # AI_DIARYLAB account
@@ -29,7 +29,7 @@ jobs:
           ACCOUNTS="DEFAULT"
           case "${{ github.event.schedule }}" in
             "30 */4 * * *") ACCOUNTS="AI_BUILDERS_LAB" ;;
-            "15 */4 * * *") ACCOUNTS="AI_SOLUTIONSHUB" ;;
+            # "15 */4 * * *") ACCOUNTS="AI_SOLUTIONSHUB" ;;  # PAUSED 2026-05-04
             "5 */3 * * *")  ACCOUNTS="AI_GROWTHHUB247" ;;
             "20 */3 * * *") ACCOUNTS="AI_DAILY247" ;;
             "35 */3 * * *") ACCOUNTS="AI_DIARYLAB" ;;
