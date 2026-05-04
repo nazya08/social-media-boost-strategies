@@ -3,8 +3,8 @@ name: Trigger Vercel Cron
 on:
   schedule:
     - cron: "0 */2 * * *"   # DEFAULT account
-    - cron: "30 */2 * * *"  # AI_BUILDERS_LAB account
-    - cron: "15 */2 * * *"  # AI_SOLUTIONSHUB account
+    - cron: "30 */4 * * *"  # AI_BUILDERS_LAB account
+    - cron: "15 */4 * * *"  # AI_SOLUTIONSHUB account
     - cron: "5 */3 * * *"   # AI_GROWTHHUB247 account
     - cron: "20 */3 * * *"  # AI_DAILY247 account
     - cron: "35 */3 * * *"  # AI_DIARYLAB account
@@ -28,8 +28,8 @@ jobs:
 
           ACCOUNTS="DEFAULT"
           case "${{ github.event.schedule }}" in
-            "30 */2 * * *") ACCOUNTS="AI_BUILDERS_LAB" ;;
-            "15 */2 * * *") ACCOUNTS="AI_SOLUTIONSHUB" ;;
+            "30 */4 * * *") ACCOUNTS="AI_BUILDERS_LAB" ;;
+            "15 */4 * * *") ACCOUNTS="AI_SOLUTIONSHUB" ;;
             "5 */3 * * *")  ACCOUNTS="AI_GROWTHHUB247" ;;
             "20 */3 * * *") ACCOUNTS="AI_DAILY247" ;;
             "35 */3 * * *") ACCOUNTS="AI_DIARYLAB" ;;
