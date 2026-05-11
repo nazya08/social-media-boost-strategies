@@ -260,7 +260,7 @@ export class SupabaseStore implements DataStore {
       )
       .in("post_status", ["Publishing", "Generated", "Failed"])
       .order("seed_published_at", { ascending: false })
-      .limit(params.maxRecords);
+      .limit(Math.max(params.maxRecords * 50, 100));
     q = this.applyAccountScope(q as any, params) as any;
     if (params.recordIds && params.recordIds.length > 0) {
       q = (q as any).in("id", params.recordIds);
