@@ -6,9 +6,9 @@ on:
     - cron: "30 */4 * * *"  # AI_BUILDERS_LAB account
     - cron: "15 */4 * * *"  # AI_SOLUTIONSHUB account
     - cron: "5 */3 * * *"   # AI_GROWTHHUB247 account
-    - cron: "20 */3 * * *"  # AI_DAILY247 account
-    - cron: "35 */3 * * *"  # AI_DIARYLAB account
-    - cron: "50 */3 * * *"  # 247AI_BUILDS account
+    # - cron: "20 */3 * * *"  # AI_DAILY247 — BANNED by Threads 2026-05-11
+    # - cron: "35 */3 * * *"  # AI_DIARYLAB — BANNED by Threads 2026-05-11
+    # - cron: "50 */3 * * *"  # 247AI_BUILDS — BANNED by Threads 2026-05-11
   workflow_dispatch: {}
 
 jobs:
@@ -31,9 +31,9 @@ jobs:
             "30 */4 * * *") ACCOUNTS="AI_BUILDERS_LAB" ;;
             "15 */4 * * *") ACCOUNTS="AI_SOLUTIONSHUB" ;;
             "5 */3 * * *")  ACCOUNTS="AI_GROWTHHUB247" ;;
-            "20 */3 * * *") ACCOUNTS="AI_DAILY247" ;;
-            "35 */3 * * *") ACCOUNTS="AI_DIARYLAB" ;;
-            "50 */3 * * *") ACCOUNTS="247AI_BUILDS" ;;
+            # "20 */3 * * *") ACCOUNTS="AI_DAILY247" ;;   # BANNED 2026-05-11
+            # "35 */3 * * *") ACCOUNTS="AI_DIARYLAB" ;;   # BANNED 2026-05-11
+            # "50 */3 * * *") ACCOUNTS="247AI_BUILDS" ;;  # BANNED 2026-05-11
           esac
 
           URL="$CRON_URL"
