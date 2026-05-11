@@ -2,10 +2,10 @@ name: Trigger Vercel Cron
 
 on:
   schedule:
-    - cron: "0 */2 * * *"   # DEFAULT account
+    - cron: "0 */4 * * *"   # DEFAULT account
     - cron: "30 */4 * * *"  # AI_BUILDERS_LAB account
     - cron: "15 */4 * * *"  # AI_SOLUTIONSHUB account
-    - cron: "5 */3 * * *"   # AI_GROWTHHUB247 account
+    - cron: "45 */4 * * *"  # AI_GROWTHHUB247 account
     # - cron: "20 */3 * * *"  # AI_DAILY247 — BANNED by Threads 2026-05-11
     # - cron: "35 */3 * * *"  # AI_DIARYLAB — BANNED by Threads 2026-05-11
     # - cron: "50 */3 * * *"  # 247AI_BUILDS — BANNED by Threads 2026-05-11
@@ -30,7 +30,7 @@ jobs:
           case "${{ github.event.schedule }}" in
             "30 */4 * * *") ACCOUNTS="AI_BUILDERS_LAB" ;;
             "15 */4 * * *") ACCOUNTS="AI_SOLUTIONSHUB" ;;
-            "5 */3 * * *")  ACCOUNTS="AI_GROWTHHUB247" ;;
+            "45 */4 * * *") ACCOUNTS="AI_GROWTHHUB247" ;;
             # "20 */3 * * *") ACCOUNTS="AI_DAILY247" ;;   # BANNED 2026-05-11
             # "35 */3 * * *") ACCOUNTS="AI_DIARYLAB" ;;   # BANNED 2026-05-11
             # "50 */3 * * *") ACCOUNTS="247AI_BUILDS" ;;  # BANNED 2026-05-11
