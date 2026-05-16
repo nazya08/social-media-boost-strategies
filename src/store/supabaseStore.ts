@@ -252,7 +252,74 @@ export class SupabaseStore implements DataStore {
     }));
   }
 
+  private async recycleIfLow(params: { accountKey?: string; treatBlankAccountKeyAsMatch?: boolean }): Promise<void> {
+    const RECYCLE_THRESHOLD = 50;
+    const RECYCLE_BATCH = 30;
+
+    const keyRaw = String(params.accountKey ?? "").trim();
+    if (!keyRaw) return;
+
+    let countQ = this.client
+      .from(this.tables.posts)
+      .select("id", { count: "exact", head: true })
+      .eq("post_status", "Generated");
+    countQ = this.applyAccountScope(countQ as any, params) as any;
+    const { count, error: countErr } = await countQ;
+    if (countErr) {
+      console.warn(`[recycleIfLow] count failed: ${countErr.message}`);
+      return;
+    }
+    const generatedCount = Number(count ?? 0);
+    if (generatedCount >= RECYCLE_THRESHOLD) return;
+
+    let pubQ = this.client
+      .from(this.tables.posts)
+      .select("id,published_at")
+      .eq("post_status", "Published")
+      .order("published_at", { ascending: true, nullsFirst: true })
+      .limit(RECYCLE_BATCH);
+    pubQ = this.applyAccountScope(pubQ as any, params) as any;
+    const { data: pubRows, error: pubErr } = await pubQ;
+    if (pubErr) {
+      console.warn(`[recycleIfLow] fetch published failed: ${pubErr.message}`);
+      return;
+    }
+    const rows = pubRows ?? [];
+    if (rows.length === 0) return;
+
+    const nowMs = Date.now();
+    let promoted = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const id = String((rows[i] as SupabaseRow).id);
+      const seedTs = new Date(nowMs + (rows.length - i) * 1000).toISOString();
+      const { error: updErr } = await this.client
+        .from(this.tables.posts)
+        .update({
+          post_status: "Generated",
+          published_at: null,
+          threads_root_id: null,
+          threads_root_url: null,
+          attempt_count: 0,
+          last_attempt_at: null,
+          error: null,
+          failure_subsystem: null,
+          seed_published_at: seedTs
+        })
+        .eq("id", id);
+      if (updErr) {
+        console.warn(`[recycleIfLow] update ${id} failed: ${updErr.message}`);
+        continue;
+      }
+      promoted++;
+    }
+    console.log(`[recycleIfLow] account=${keyRaw} generated=${generatedCount} recycled=${promoted}`);
+  }
+
   async listPublishablePosts(params: { accountKey?: string; treatBlankAccountKeyAsMatch?: boolean; maxRecords: number; recordIds?: string[] }): Promise<Array<Post>> {
+    if (!params.recordIds || params.recordIds.length === 0) {
+      await this.recycleIfLow({ accountKey: params.accountKey, treatBlankAccountKeyAsMatch: params.treatBlankAccountKeyAsMatch });
+    }
+
     let q = this.client
       .from(this.tables.posts)
       .select(
